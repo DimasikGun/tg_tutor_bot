@@ -1,7 +1,16 @@
+import random
+
 from sqlalchemy import Column, String, Integer, ForeignKey, Text
 from sqlalchemy.orm import relationship
 
 from bot.db.base import BaseModel
+
+
+def generate_random_code():
+    symbols = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k",
+               "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"]
+    code = "".join([random.choice(symbols) for _ in range(6)])
+    return code
 
 
 class Courses(BaseModel):
@@ -9,6 +18,7 @@ class Courses(BaseModel):
 
     id = Column(Integer, unique=True, nullable=False, primary_key=True, autoincrement=True)
     name = Column(String(60), nullable=False)
+    key = Column(String(6), default=generate_random_code())
     teacher = Column(Integer, ForeignKey('users.user_id'))
     students = relationship('CoursesStudents', backref='courses')
 

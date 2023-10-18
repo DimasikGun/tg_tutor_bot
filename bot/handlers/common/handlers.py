@@ -1,5 +1,6 @@
 from aiogram import Router, F
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +37,15 @@ async def give_role(callback: CallbackQuery, session: AsyncSession):
             await callback.answer('Ok, i get it, Ur a teacher')
             await callback.message.answer('Now choose one option below', reply_markup=kb.main)
         await session.commit()
+
+
+@router.message(Command('cancel'))
+@router.message(F.text.casefold() == "cancel")
+async def cmd_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        text="Action was cancelled",
+        reply_markup=kb.main)
 
 
 @router.message()
