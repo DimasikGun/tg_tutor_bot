@@ -1,7 +1,9 @@
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, \
+    CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,10 +18,30 @@ router = Router()
 async def tutor_courses(message: Message, session: AsyncSession):
     stmt = select(Courses).where(Courses.teacher == message.from_user.id)
     res = await session.execute(stmt)
-    if res.all():
-        await message.answer('Here are your courses:', reply_markup=kb.courses)
+    courses = res.scalars().all()
+    if courses:
+        builder = InlineKeyboardBuilder()
+        for course in courses:
+            builder.add(InlineKeyboardButton(text=course.name, callback_data=f'course_{course.id}'))
+        builder.adjust(2)
+        await message.answer('Choose a course:', reply_markup=builder.as_markup())
+        await message.answer('Or an option below:', reply_markup=kb.courses)
     else:
         await message.answer('You don`t have any courses for now', reply_markup=kb.courses)
+
+
+@router.callback_query(Teacher(), F.data.startswith('course_'))
+async def teacher_course_info(callback: CallbackQuery, session: AsyncSession):
+    course_id = int(callback.data[7:])
+    print(course_id)
+    stmt = select(Courses).where(Courses.id == course_id)
+    result = await session.execute(stmt)
+    course = result.scalar()
+    if course:
+        await callback.answer(f'Here is {course.name}')
+        await callback.message.answer(f'Course {course.name}', reply_markup=kb.courses)
+    else:
+        await callback.message.answer('Course not found', reply_markup=kb.courses)
 
 
 class AddCourse(StatesGroup):
@@ -38,7 +60,7 @@ async def add_course_start(message: Message, state: FSMContext):
 async def add_course(message: Message, state: FSMContext):
     # Update the state data with the course name
     await state.update_data(name=message.text)
-    if len(message.text) >= 60:
+    if len(message.text) >= 30:
         # If the name is too long, stay in the AddCourse.name state and inform the user
         await state.set_state(AddCourse.name)
         await message.answer('Name is too long, try shorter')

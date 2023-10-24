@@ -1,7 +1,8 @@
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import Message, ReplyKeyboardRemove, InlineKeyboardButton, CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,12 +14,33 @@ router = Router()
 
 @router.message(F.text == 'My courses')
 async def student_courses(message: Message, session: AsyncSession):
-    stmt = select(CoursesStudents).where(CoursesStudents.student_id == message.from_user.id)
-    res = await session.execute(stmt)
-    if res.all():
-        await message.answer('Here are your courses:', reply_markup=kb.courses)
+    stmt = select(Courses).join(CoursesStudents).filter(CoursesStudents.student_id == message.from_user.id)
+    result = await session.execute(stmt)
+    courses = result.scalars().all()
+
+    if courses:
+        builder = InlineKeyboardBuilder()
+        for course in courses:
+            builder.add(InlineKeyboardButton(text=course.name, callback_data=f'course_{course.id}'))
+        builder.adjust(2)
+        await message.answer('Choose a course:', reply_markup=builder.as_markup())
+        await message.answer('Or an option below:', reply_markup=kb.courses)
     else:
         await message.answer('You haven`t joined any courses yet', reply_markup=kb.courses)
+
+
+@router.callback_query(F.data.startswith('course_'))
+async def course_info(callback: CallbackQuery, session: AsyncSession):
+    course_id = int(callback.data[7:])
+    print(course_id)
+    stmt = select(Courses).where(Courses.id == course_id)
+    result = await session.execute(stmt)
+    course = result.scalar()
+    if course:
+        await callback.answer(f'Here is {course.name}')
+        await callback.message.answer(f'Course {course.name}', reply_markup=kb.courses)
+    else:
+        await callback.message.answer('Course not found', reply_markup=kb.courses)
 
 
 class JoinCourse(StatesGroup):
@@ -35,9 +57,14 @@ async def add_course_start(message: Message, state: FSMContext):
 async def add_course(message: Message, state: FSMContext, session: AsyncSession):
     # Extract the code from the message text
     code = message.text
-    # Parse the course_id and key from the code
-    course_id = int(code[6:])
-    key = str(code[:6])
+    try:
+        # Parse the course_id and key from the code
+        course_id = int(code[6:])
+        key = str(code[:6])
+    except ValueError:
+        await state.clear()
+        await message.answer('Wrong code', reply_markup=kb.courses)
+        return
 
     # Check if the provided course_id and key match a course in the database
     stmt = select(Courses).where(Courses.id == course_id and Courses.key == key)
@@ -68,4 +95,3 @@ async def add_course(message: Message, state: FSMContext, session: AsyncSession)
     except AttributeError:
         # If there is no matching course, inform the user
         await message.answer('There is no course with such code(', reply_markup=kb.courses)
-

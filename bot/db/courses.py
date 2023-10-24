@@ -1,6 +1,7 @@
 import random
+from datetime import datetime
 
-from sqlalchemy import Column, String, Integer, ForeignKey, Text
+from sqlalchemy import Column, String, Integer, ForeignKey, Text, DateTime
 from sqlalchemy.orm import relationship
 
 from bot.db.base import BaseModel
@@ -17,7 +18,7 @@ class Courses(BaseModel):
     __tablename__ = 'courses'  # noqa
 
     id = Column(Integer, unique=True, nullable=False, primary_key=True, autoincrement=True)
-    name = Column(String(60), nullable=False)
+    name = Column(String(30), nullable=False)
     key = Column(String(6), default=generate_random_code())
     teacher = Column(Integer, ForeignKey('users.user_id'))
     students = relationship('CoursesStudents', backref='courses')
@@ -38,6 +39,8 @@ class Publications(BaseModel):
     text = Column(Text, nullable=False)
     course = Column(Integer, ForeignKey('courses.id'))
     media = relationship('MediaPublications', backref='publications')
+    add_date = Column(DateTime(), default=datetime.now())
+    finish_date = Column(DateTime(), default=None, nullable=True)
 
 
 class Media(BaseModel):
