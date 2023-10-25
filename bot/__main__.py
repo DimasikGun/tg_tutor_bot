@@ -23,7 +23,7 @@ async def main():
     await dp.start_polling(bot)
 
 
-#TODO: ADD CANCEL TO ALL FSM's
+# TODO: ADD CANCEL TO ALL FSM's
 
 
 # TODO: remove  URL from alembic.ini

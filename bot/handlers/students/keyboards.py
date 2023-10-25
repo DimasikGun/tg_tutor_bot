@@ -7,3 +7,11 @@ courses = ReplyKeyboardMarkup(keyboard=[
 ],
     resize_keyboard=True,
     input_field_placeholder='Choose option below')
+
+single_course = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text='Publications'),
+     KeyboardButton(text='Course info')],
+    [KeyboardButton(text='Home page')]
+],
+    resize_keyboard=True,
+    input_field_placeholder='Choose option below')
