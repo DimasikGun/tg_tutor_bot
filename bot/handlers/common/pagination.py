@@ -3,8 +3,7 @@ from contextlib import suppress
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import InlineKeyboardButton, CallbackQuery, Message
+from aiogram.types import InlineKeyboardButton, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +60,3 @@ async def pagination_handler(query: CallbackQuery, callback_data: Pagination, se
         builder.row(*pag.buttons, width=2)
         await query.message.edit_reply_markup(reply_markup=builder.as_markup())
     await query.answer()
-
-
-

@@ -35,8 +35,8 @@ class Publications(BaseModel):
     __tablename__ = 'publications'  # noqa
 
     id = Column(Integer, unique=True, nullable=False, primary_key=True, autoincrement=True)
-    title = Column(String(60), nullable=True)# TODO: CHANGE NULLABLE
-    text = Column(Text, nullable=False)# TODO: CHANGE NULLABLE
+    title = Column(String(60), nullable=False)
+    text = Column(Text, nullable=True)
     course = Column(Integer, ForeignKey('courses.id'))
     media = relationship('MediaPublications', backref='publications')
     add_date = Column(DateTime(), default=datetime.now())
@@ -47,6 +47,6 @@ class Media(BaseModel):
     __tablename__ = 'media'  # noqa
 
     id = Column(Integer, unique=True, nullable=False, primary_key=True, autoincrement=True)
-    file_id = Column(String(64), unique=True, primary_key=True, nullable=False, autoincrement=False)
-    media_type = Column(String(12), nullable=False)
+    file_id = Column(String(120), unique=True, primary_key=True, nullable=False, autoincrement=False)
+    media_type = Column(String(30), nullable=False)
     publications = relationship('MediaPublications', backref='media')

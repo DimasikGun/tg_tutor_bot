@@ -6,10 +6,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import CoursesStudents, Courses
-from handlers.common.pagination import pagination_handler
-from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info
+from handlers.common.pagination import pagination_handler, Pagination
+from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
+    single_publication
 from handlers.students import keyboards as kb
-from handlers.tutors.handlers import Pagination
 
 router = Router()
 
@@ -40,6 +40,11 @@ async def pagination_handler_student(query: CallbackQuery, callback_data: Pagina
 @router.message(F.text == 'Publications', CourseInteract.publications)
 async def publications_student(message: Message, session: AsyncSession, state: FSMContext):
     await publications(message, session, state, kb)
+
+
+@router.callback_query(F.data.startswith('publication_'))
+async def student_single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    await single_publication(callback, session, state, kb)
 
 
 class JoinCourse(StatesGroup):
