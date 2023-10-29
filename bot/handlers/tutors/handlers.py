@@ -31,15 +31,16 @@ async def tutor_courses(message: Message, session: AsyncSession):
 @router.callback_query(Teacher(), F.data.startswith('course_'))
 async def teacher_course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     await course_info(callback, session, state, kb)
+    await state.set_state(CourseInteract.single_course)
 
 
-@router.callback_query(Teacher(), CourseInteract.pagination, Pagination.filter(F.action.in_(('prev', 'next'))))
-async def pagination_handler_admin(query: CallbackQuery, callback_data: Pagination, session: AsyncSession,
-                                   state: FSMContext):
+@router.callback_query(Teacher(), CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))))
+async def pagination_handler_teacher(query: CallbackQuery, callback_data: Pagination, session: AsyncSession,
+                                     state: FSMContext):
     await pagination_handler(query, callback_data, session, state)
 
 
-@router.message(Teacher(), F.text == 'Publications', CourseInteract.publications)
+@router.message(Teacher(), F.text == 'Publications', CourseInteract.single_course)
 async def publications_teacher(message: Message, session: AsyncSession, state: FSMContext):
     await publications(message, session, state, kb)
 
@@ -48,15 +49,14 @@ class AddPublication(StatesGroup):
     title = State()
     text = State()
     media = State()
-    confirm = State()
 
 
-@router.message(Teacher(), F.text == 'Add publication', CourseInteract.publications)
+@router.message(Teacher(), F.text == 'Add publication', CourseInteract.single_course)
 async def add_publication_start(message: Message, state: FSMContext):
     course_id = await state.get_data()
     await state.clear()
     await state.set_state(AddPublication.title)
-    await state.update_data(course_id=course_id['course'])
+    await state.update_data(course_id=course_id['course_id'])
     await message.answer('How would you like to call your publication?', reply_markup=ReplyKeyboardRemove())
 
 
@@ -78,7 +78,7 @@ async def add_publication_text(message: Message, state: FSMContext):
     if len(message.text) >= 4096:
         # If the name is too long, stay in the AddCourse.name state and inform the user
         await state.set_state(AddPublication.text)
-        await message.answer('Name is too long, try shorter')
+        await message.answer('Text is too long, try shorter')
     else:
         # If the name is acceptable, move to the AddCourse.confirm state
         await state.update_data(text=message.text)
@@ -123,7 +123,8 @@ async def add_publication_preview(message: Message, session: AsyncSession, state
     if audio:
         await message.answer('Audio:')
         await message.answer_media_group(audio)
-    await state.clear()
+    await state.set_state(CourseInteract.publications)
+    await publications_teacher(message, session, state)
 
 
 @router.message(Teacher(), AddPublication.media)
@@ -157,8 +158,10 @@ async def add_publication_media(message: Message, state: FSMContext):
 
 
 @router.callback_query(Teacher(), F.data.startswith('publication_'))
-async def student_single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+async def teacher_single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     await single_publication(callback, session, state, kb)
+    await state.set_state(CourseInteract.single_course)
+    await publications_teacher(callback.message, session, state)
 
 
 class AddCourse(StatesGroup):
@@ -203,6 +206,7 @@ async def add_course_confirmed(message: Message, session: AsyncSession, state: F
     await message.reply(
         f'Your course "{data["name"]}" have been created',
         reply_markup=kb.courses)
+    await tutor_courses(message, session)
 
 
 @router.message(Teacher(), AddCourse.confirm, F.text.casefold() == 'no')

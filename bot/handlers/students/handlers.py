@@ -29,15 +29,16 @@ async def student_courses(message: Message, session: AsyncSession):
 @router.callback_query(F.data.startswith('course_'))
 async def student_course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     await course_info(callback, session, state, kb)
+    await state.set_state(CourseInteract.single_course)
 
 
-@router.callback_query(CourseInteract.pagination, Pagination.filter(F.action.in_(('prev', 'next'))))
+@router.callback_query(CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))))
 async def pagination_handler_student(query: CallbackQuery, callback_data: Pagination, session: AsyncSession,
                                      state: FSMContext):
     await pagination_handler(query, callback_data, session, state)
 
 
-@router.message(F.text == 'Publications', CourseInteract.publications)
+@router.message(F.text == 'Publications', CourseInteract.single_course)
 async def publications_student(message: Message, session: AsyncSession, state: FSMContext):
     await publications(message, session, state, kb)
 
@@ -45,6 +46,8 @@ async def publications_student(message: Message, session: AsyncSession, state: F
 @router.callback_query(F.data.startswith('publication_'))
 async def student_single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     await single_publication(callback, session, state, kb)
+    await state.set_state(CourseInteract.single_course)
+    await publications_student(callback.message, session, state)
 
 
 class JoinCourse(StatesGroup):

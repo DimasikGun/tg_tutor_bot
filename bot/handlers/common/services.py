@@ -20,7 +20,7 @@ class CourseInteract(StatesGroup):
 
 async def publications(message: Message, session: AsyncSession, state: FSMContext, kb):
     course_id = await state.get_data()
-    stmt = select(Publications).where(Publications.course == course_id['course']).order_by(
+    stmt = select(Publications).where(Publications.course == course_id['course_id']).order_by(
         Publications.add_date.desc()).limit(5)
     res = await session.execute(stmt)
     posts = res.scalars().all()
@@ -31,10 +31,10 @@ async def publications(message: Message, session: AsyncSession, state: FSMContex
             builder.row(InlineKeyboardButton(text=post.title, callback_data=f'publication_{post.id}'))
 
         builder.row(*pag.buttons, width=2)
-        await state.set_state(CourseInteract.pagination)
+        await state.set_state(CourseInteract.single_course)
         await message.answer('Here is publications:', reply_markup=builder.as_markup())
     else:
-        await state.clear()
+        await state.set_state(CourseInteract.single_course)
         await message.answer('There is no any publications yet', reply_markup=kb.single_course)
 
 
@@ -54,7 +54,7 @@ async def course_info(callback: CallbackQuery, session: AsyncSession, state: FSM
     course = result.scalar()
     if course:
         await state.set_state(CourseInteract.publications)
-        await state.update_data(course=course_id)
+        await state.update_data(course_id=course_id)
         await callback.answer(f'Here is {course.name}')
         await callback.message.answer(f'Course {course.name}', reply_markup=kb.single_course)
     else:
@@ -87,7 +87,7 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
         else:
             documents.append(InputMediaDocument(media=media.file_id))
     await callback.message.answer(f'<b>{publication.title}</b>\n{publication.text}', parse_mode='HTML',
-                                  reply_markup=kb.courses)
+                                  reply_markup=kb.single_course)
 
     if media_group:
         await callback.message.answer_media_group(media_group)
@@ -97,4 +97,4 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
     if audio:
         await callback.message.answer('Audio:')
         await callback.message.answer_media_group(audio)
-    await state.clear()
+    await callback.answer()
