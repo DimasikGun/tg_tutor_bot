@@ -28,7 +28,8 @@ def paginator(page: int = 0):
 
 async def pagination_handler(query: CallbackQuery, callback_data: Pagination, session: AsyncSession, state: FSMContext):
     course_id = await state.get_data()
-    stmt = select(Publications).where(Publications.course == course_id['course_id']).order_by(Publications.add_date.desc())
+    stmt = select(Publications).where(Publications.course == course_id['course_id']).order_by(
+        Publications.add_date.desc())
     res = await session.execute(stmt)
     posts = res.scalars().all()
 
@@ -60,4 +61,3 @@ async def pagination_handler(query: CallbackQuery, callback_data: Pagination, se
         builder.row(*pag.buttons, width=2)
         await query.message.edit_reply_markup(reply_markup=builder.as_markup())
     await query.answer()
-

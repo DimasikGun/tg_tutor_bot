@@ -13,9 +13,6 @@ from handlers.common.pagination import paginator
 
 class CourseInteract(StatesGroup):
     single_course = State()
-    publications = State()
-    pagination = State()
-    single_publication = State()
 
 
 async def publications(message: Message, session: AsyncSession, state: FSMContext, kb):
@@ -53,7 +50,7 @@ async def course_info(callback: CallbackQuery, session: AsyncSession, state: FSM
     result = await session.execute(stmt)
     course = result.scalar()
     if course:
-        await state.set_state(CourseInteract.publications)
+        await state.set_state(CourseInteract.single_course)
         await state.update_data(course_id=course_id)
         await callback.answer(f'Here is {course.name}')
         await callback.message.answer(f'Course {course.name}', reply_markup=kb.single_course)
@@ -74,8 +71,6 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
     query = select(Media).join(MediaPublications).where(MediaPublications.publication_id == publication_id)
     result = await session.execute(query)
     media_files = result.scalars().all()
-
-    # TODO: OPTIMIZE + DRY
 
     for media in media_files:
         if media.media_type == str(ContentType.PHOTO):

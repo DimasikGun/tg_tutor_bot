@@ -29,7 +29,6 @@ async def student_courses(message: Message, session: AsyncSession):
 @router.callback_query(F.data.startswith('course_'))
 async def student_course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     await course_info(callback, session, state, kb)
-    await state.set_state(CourseInteract.single_course)
 
 
 @router.callback_query(CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))))

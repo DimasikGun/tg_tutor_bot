@@ -1,5 +1,6 @@
 from aiogram import Router, F
 from aiogram.enums import ContentType
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, \
@@ -31,7 +32,6 @@ async def tutor_courses(message: Message, session: AsyncSession):
 @router.callback_query(Teacher(), F.data.startswith('course_'))
 async def teacher_course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     await course_info(callback, session, state, kb)
-    await state.set_state(CourseInteract.single_course)
 
 
 @router.callback_query(Teacher(), CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))))
@@ -53,10 +53,7 @@ class AddPublication(StatesGroup):
 
 @router.message(Teacher(), F.text == 'Add publication', CourseInteract.single_course)
 async def add_publication_start(message: Message, state: FSMContext):
-    course_id = await state.get_data()
-    await state.clear()
     await state.set_state(AddPublication.title)
-    await state.update_data(course_id=course_id['course_id'])
     await message.answer('How would you like to call your publication?', reply_markup=ReplyKeyboardRemove())
 
 
@@ -123,7 +120,6 @@ async def add_publication_preview(message: Message, session: AsyncSession, state
     if audio:
         await message.answer('Audio:')
         await message.answer_media_group(audio)
-    await state.set_state(CourseInteract.publications)
     await publications_teacher(message, session, state)
 
 
@@ -192,9 +188,17 @@ async def add_course(message: Message, state: FSMContext):
                 [
                     KeyboardButton(text="Yes"),
                     KeyboardButton(text="No"),
-                ]
+                ],
+                [KeyboardButton(text="Cancel")]
             ], resize_keyboard=True))
 
+
+@router.message(F.text.casefold() == "cancel")
+async def cmd_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        text="Action was cancelled",
+        reply_markup=kb.courses)
 
 @router.message(Teacher(), AddCourse.confirm, F.text.casefold() == 'yes')
 async def add_course_confirmed(message: Message, session: AsyncSession, state: FSMContext):
