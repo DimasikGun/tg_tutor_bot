@@ -28,7 +28,8 @@ async def student_courses(message: Message, session: AsyncSession):
 
 @router.callback_query(F.data.startswith('course_'))
 async def student_course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    await course_info(callback, session, state, kb)
+    course_id = int(callback.data[7:])
+    await course_info(callback, session, state, kb, course_id)
 
 
 @router.callback_query(CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))))
@@ -97,6 +98,7 @@ async def add_course(message: Message, state: FSMContext, session: AsyncSession)
             await session.merge(CoursesStudents(course_id=course_id, student_id=message.from_user.id))
             await session.commit()
             await message.answer(f'You`ve just joined a "{name}" course', reply_markup=kb.courses)
+            await student_courses(message, session)
 
     except AttributeError:
         # If there is no matching course, inform the user

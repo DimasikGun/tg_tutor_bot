@@ -1,15 +1,15 @@
 from aiogram import Router, F
 from aiogram.enums import ContentType
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, \
     InputMediaPhoto, InputMediaVideo, InputMediaAudio, InputMediaDocument
-from sqlalchemy import select
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import Courses, Publications, MediaPublications, Media
+from db import Courses, Publications, Media, CoursesStudents
 from handlers.common.pagination import pagination_handler, Pagination
+from handlers.common.queries import get_students, get_code
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
     single_publication
 from handlers.tutors import keyboards as kb
@@ -31,7 +31,14 @@ async def tutor_courses(message: Message, session: AsyncSession):
 
 @router.callback_query(Teacher(), F.data.startswith('course_'))
 async def teacher_course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    await course_info(callback, session, state, kb)
+    course_id = int(callback.data[7:])
+    await course_info(callback, session, state, kb, course_id)
+    code = await get_code(session, course_id)
+    students = await get_students(session, course_id)
+    await callback.message.answer(f'Now there are <b>{len(students) if students else "no"}</b> students\nInvite code:',
+                                  parse_mode='HTML')
+    await callback.message.answer(f'<b>{code}</b>',
+                                  parse_mode='HTML')
 
 
 @router.callback_query(Teacher(), CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))))
@@ -90,16 +97,14 @@ async def add_publication_preview(message: Message, session: AsyncSession, state
     audio = []
     documents = []
 
-    publication = await session.merge(Publications(title=data['title'], course=data['course_id'], text=data['text']))
+    publication = await session.merge(Publications(title=data['title'], course_id=data['course_id'], text=data['text']))
     await session.commit()
     await message.reply(
         f'Your post have been created. It will look like this:',
         reply_markup=kb.single_course)
 
     for media in data['media']:
-        media_query = await session.merge(Media(media_type=media[0], file_id=media[1]))
-        await session.commit()
-        await session.merge(MediaPublications(media_id=media_query.id, publication_id=publication.id))
+        await session.merge(Media(media_type=media[0], file_id=media[1], publication=publication.id))
         await session.commit()
         if media[0] == str(ContentType.PHOTO):
             media_group.append(InputMediaPhoto(media=media[1]))
@@ -200,6 +205,7 @@ async def cmd_cancel(message: Message, state: FSMContext):
         text="Action was cancelled",
         reply_markup=kb.courses)
 
+
 @router.message(Teacher(), AddCourse.confirm, F.text.casefold() == 'yes')
 async def add_course_confirmed(message: Message, session: AsyncSession, state: FSMContext):
     # Retrieve the course name from the state posts, create a new course, and commit it
@@ -223,7 +229,99 @@ async def add_course_declined(message: Message, state: FSMContext):
 @router.message(Teacher(), AddCourse.confirm)
 async def add_course_unknown(message: Message):
     # Handle an unknown response in the AddCourse.confirm state
-    await message.reply('I don`t get it, choose "yes" or "no"(')
+    await message.reply('I don`t get it, choose "yes", "no" or "cancel"')
 
-# @router.message()
-# async def echo(message: Message):
+
+class EditCourse(StatesGroup):
+    name = State()
+    name_confirm = State()
+    delete_confirm = State()
+
+
+@router.message(Teacher(), F.text == 'Edit course', CourseInteract.single_course)
+async def edit_course(message: Message, state: FSMContext):
+    await message.answer('Edit your course', reply_markup=kb.edit_course)
+    await state.set_state(CourseInteract.single_course)
+
+
+@router.message(Teacher(), F.text == 'Change name', CourseInteract.single_course)
+async def change_course_name_start(message: Message, state: FSMContext):
+    await state.set_state(EditCourse.name)
+    await message.answer('Enter a new name for your course', reply_markup=ReplyKeyboardRemove())
+
+
+@router.message(Teacher(), EditCourse.name)
+async def change_course_name(message: Message, state: FSMContext):
+    await add_course(message, state)
+    await state.set_state(EditCourse.name_confirm)
+
+
+@router.message(Teacher(), EditCourse.name_confirm, F.text.casefold() == 'yes')
+async def change_course_name_confirmed(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+    stmt = update(Courses).where(Courses.id == data['course_id']).values(name=data['name'])
+    await session.execute(stmt)
+    await session.commit()
+    await message.reply(
+        f'Course name have been changed to "{data["name"]}"',
+        reply_markup=kb.courses)
+    await tutor_courses(message, session)
+    await state.set_state(CourseInteract.single_course)
+
+
+@router.message(Teacher(), EditCourse.name_confirm, F.text.casefold() == 'no')
+async def change_course_name_declined(message: Message, state: FSMContext):
+    await message.answer("Then enter a new one", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(EditCourse.name)
+
+
+@router.message(Teacher(), EditCourse.name_confirm)
+async def add_course_unknown(message: Message):
+    await message.reply('I don`t get it, choose "yes", "no" or "cancel"')
+
+
+@router.message(Teacher(), F.text == 'Delete course', CourseInteract.single_course)
+async def change_course_name_start(message: Message, state: FSMContext):
+    data = await state.get_data()
+    await state.set_state(EditCourse.delete_confirm)
+    await message.answer(f'Are you sure you want to delete your course?',
+                         reply_markup=ReplyKeyboardMarkup(
+                             keyboard=[
+                                 [
+                                     KeyboardButton(text="Yes"),
+                                     KeyboardButton(text="No"),
+                                 ]], resize_keyboard=True))
+
+
+@router.message(Teacher(), EditCourse.delete_confirm, F.text.casefold() == 'yes')
+async def change_course_name_confirmed(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+    course_id = data['course_id']
+
+    # Удаление всех студентов, связанных с курсом
+    stmt = delete(CoursesStudents).where(CoursesStudents.course_id == course_id)
+    await session.execute(stmt)
+    # Удаление всех медиафайлов, связанных с публикациями, связанными с курсом
+    stmt = delete(Media).where(
+        Media.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))
+    await session.execute(stmt)
+
+    stmt = delete(Publications).where(Publications.course_id == course_id)
+    await session.execute(stmt)
+
+    # Удаление курса
+    stmt = delete(Courses).where(Courses.id == course_id)
+    await session.execute(stmt)
+
+    await session.commit()
+
+    await message.reply(
+        f'Course have been deleted',
+        reply_markup=kb.courses)
+    await tutor_courses(message, session)
+    await state.set_state(CourseInteract.single_course)
+
+
+@router.message(Teacher(), EditCourse.name_confirm, F.text.casefold() == 'no')
+async def change_course_name_declined(message: Message, session: AsyncSession, state: FSMContext):
+    await tutor_courses(message, session)

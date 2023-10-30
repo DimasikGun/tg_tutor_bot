@@ -2,12 +2,12 @@ from aiogram.enums import ContentType
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, InlineKeyboardButton, CallbackQuery, InputMediaPhoto, InputMediaVideo, \
-    InputMediaAudio, InputMediaDocument
+    InputMediaAudio, InputMediaDocument, ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import Publications, Courses, Media, MediaPublications
+from db import Publications, Courses, Media
 from handlers.common.pagination import paginator
 
 
@@ -17,7 +17,7 @@ class CourseInteract(StatesGroup):
 
 async def publications(message: Message, session: AsyncSession, state: FSMContext, kb):
     course_id = await state.get_data()
-    stmt = select(Publications).where(Publications.course == course_id['course_id']).order_by(
+    stmt = select(Publications).where(Publications.course_id == course_id['course_id']).order_by(
         Publications.add_date.desc()).limit(5)
     res = await session.execute(stmt)
     posts = res.scalars().all()
@@ -44,16 +44,16 @@ async def create_inline_courses(courses, message, kb):
     await message.answer('Or an option below:', reply_markup=kb.courses)
 
 
-async def course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext, kb):
-    course_id = int(callback.data[7:])
+# TODO: REMOVE REPETITIVE COURSE QUERY
+async def course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext, kb, course_id):
     stmt = select(Courses).where(Courses.id == course_id)
     result = await session.execute(stmt)
     course = result.scalar()
     if course:
         await state.set_state(CourseInteract.single_course)
         await state.update_data(course_id=course_id)
-        await callback.answer(f'Here is {course.name}')
-        await callback.message.answer(f'Course {course.name}', reply_markup=kb.single_course)
+        await callback.answer(f'Here is "{course.name}"')
+        await callback.message.answer(f'Course "{course.name}"', reply_markup=kb.single_course)
     else:
         await callback.message.answer('Course not found', reply_markup=kb.courses)
 
@@ -68,7 +68,7 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
     result = await session.execute(stmt)
     publication = result.scalar()
 
-    query = select(Media).join(MediaPublications).where(MediaPublications.publication_id == publication_id)
+    query = select(Media).where(Media.publication == publication_id)
     result = await session.execute(query)
     media_files = result.scalars().all()
 
