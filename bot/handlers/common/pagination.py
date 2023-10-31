@@ -2,41 +2,33 @@ from contextlib import suppress
 
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters.callback_data import CallbackData
-from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from db import Publications
 
 
 class Pagination(CallbackData, prefix='pag'):
     action: str
     page: int
+    entity_type: str
 
 
-def paginator(page: int = 0):
+def paginator(page: int = 0, entity_type: str = 'publications'):
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text='⬅', callback_data=Pagination(action='prev', page=page).pack()),
-        InlineKeyboardButton(text='➡', callback_data=Pagination(action='next', page=page).pack()),
+        InlineKeyboardButton(text='⬅',
+                             callback_data=Pagination(action='prev', page=page, entity_type=entity_type).pack()),
+        InlineKeyboardButton(text='➡',
+                             callback_data=Pagination(action='next', page=page, entity_type=entity_type).pack()),
         width=2
     )
     return builder
 
 
-async def pagination_handler(query: CallbackQuery, callback_data: Pagination, session: AsyncSession, state: FSMContext):
-    course_id = await state.get_data()
-    stmt = select(Publications).where(Publications.course_id == course_id['course_id']).order_by(
-        Publications.add_date.desc())
-    res = await session.execute(stmt)
-    posts = res.scalars().all()
-
+async def pagination_handler(query: CallbackQuery, callback_data: Pagination, records):
     page_num = int(callback_data.page)
 
     if callback_data.action == 'next':
-        if page_num < (len(posts) // 5):
+        if page_num < (len(records) // 5):
             page = page_num + 1
         else:
             page = page_num
@@ -49,14 +41,17 @@ async def pagination_handler(query: CallbackQuery, callback_data: Pagination, se
             await query.answer('This is the first page')
 
     with suppress(TelegramBadRequest):
-        pag = paginator(page)
+        pag = paginator(page, entity_type=callback_data.entity_type)
         builder = InlineKeyboardBuilder()
         start_index = page * 5
-        end_index = min(start_index + 5, len(posts))
+        end_index = min(start_index + 5, len(records))
 
-        for i in range(start_index, end_index):
-            builder.row(InlineKeyboardButton(text=posts[i].title,
-                                             callback_data=f'publication_{posts[i].id}'))
+        if callback_data.entity_type == 'publications':
+            for i in range(start_index, end_index):
+                builder.row(InlineKeyboardButton(text=records[i].title, callback_data=f'publication_{records[i].id}'))
+        elif callback_data.entity_type == 'students':
+            for i in range(start_index, end_index):
+                builder.row(InlineKeyboardButton(text=records[i].username, callback_data=f'student_{records[i].user_id}'))
 
         builder.row(*pag.buttons, width=2)
         await query.message.edit_reply_markup(reply_markup=builder.as_markup())

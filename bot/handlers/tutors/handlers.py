@@ -3,13 +3,14 @@ from aiogram.enums import ContentType
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, \
-    InputMediaPhoto, InputMediaVideo, InputMediaAudio, InputMediaDocument
+    InputMediaPhoto, InputMediaVideo, InputMediaAudio, InputMediaDocument, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import Courses, Publications, Media, CoursesStudents
-from handlers.common.pagination import pagination_handler, Pagination
-from handlers.common.queries import get_students, get_code
+from db import Courses, Publications, Media, Users, CoursesStudents
+from handlers.common.pagination import pagination_handler, Pagination, paginator
+from handlers.common.queries import get_students, get_code, delete_course, get_publications
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
     single_publication
 from handlers.tutors import keyboards as kb
@@ -41,15 +42,93 @@ async def teacher_course_info(callback: CallbackQuery, session: AsyncSession, st
                                   parse_mode='HTML')
 
 
-@router.callback_query(Teacher(), CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))))
+@router.callback_query(Teacher(), CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))),
+                       Pagination.filter(F.entity_type == 'publications'))
 async def pagination_handler_teacher(query: CallbackQuery, callback_data: Pagination, session: AsyncSession,
                                      state: FSMContext):
-    await pagination_handler(query, callback_data, session, state)
+    data = await state.get_data()
+    course_id = data['course_id']
+    posts = await get_publications(session, course_id)
+    await pagination_handler(query, callback_data, posts)
 
 
 @router.message(Teacher(), F.text == 'Publications', CourseInteract.single_course)
 async def publications_teacher(message: Message, session: AsyncSession, state: FSMContext):
     await publications(message, session, state, kb)
+
+
+@router.callback_query(Teacher(), CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))),
+                       Pagination.filter(F.entity_type == 'students'))
+async def pagination_handler_students(query: CallbackQuery, callback_data: Pagination, session: AsyncSession,
+                                      state: FSMContext):
+    data = await state.get_data()
+    course_id = data['course_id']
+    students = await get_students(session, course_id)
+    await pagination_handler(query, callback_data, students)
+
+
+@router.message(Teacher(), F.text == 'Students', CourseInteract.single_course)
+async def students(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+    course_id = data['course_id']
+    stmt = select(Users).join(CoursesStudents).where(Courses.id == course_id).limit(5)
+    res = await session.execute(stmt)
+    students = res.scalars().all()
+    if students:
+        pag = paginator(entity_type='students')
+        builder = InlineKeyboardBuilder()
+        for students in students:
+            builder.row(InlineKeyboardButton(text=students.username, callback_data=f'student_{students.user_id}'))
+
+        builder.row(*pag.buttons, width=2)
+        await state.set_state(CourseInteract.single_course)
+        await message.answer('Here is students:', reply_markup=builder.as_markup())
+    else:
+        await state.set_state(CourseInteract.single_course)
+        await message.answer('There is no any students yet', reply_markup=kb.single_course)
+
+
+class Students(StatesGroup):
+    delete_confirm = State()
+
+
+@router.callback_query(Teacher(), F.data.startswith('student_'), CourseInteract.single_course)
+async def single_student(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    student_id = int(callback.data[8:])
+    stmt = select(Users.username).where(Users.user_id == student_id)
+    result = await session.execute(stmt)
+    student = result.scalar()
+    await callback.answer()
+    await callback.message.answer(f'Do you want to delete {student} from your course?',
+                                  reply_markup=ReplyKeyboardMarkup(
+                                      keyboard=[
+                                          [
+                                              KeyboardButton(text="Yes"),
+                                              KeyboardButton(text="No"),
+                                          ]], resize_keyboard=True))
+    await state.set_state(Students.delete_confirm)
+    await state.update_data(student_id=student_id)
+
+
+@router.message(Teacher(), Students.delete_confirm, F.text.casefold() == 'yes')
+async def delete_student_confirmed(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+    course_id = data['course_id']
+    student_id = data['student_id']
+    stmt = delete(CoursesStudents).where(CoursesStudents.course_id == course_id and CoursesStudents.user_id == student_id)
+    await session.execute(stmt)
+    await session.commit()
+    await message.reply(
+        f'User have been deleted from your course',
+        reply_markup=kb.single_course)
+    await state.set_state(CourseInteract.single_course)
+    await students(message, session, state)
+
+
+@router.message(Teacher(), Students.delete_confirm, F.text.casefold() == 'no')
+async def delete_student_declined(message: Message, session: AsyncSession, state: FSMContext):
+    await state.set_state(CourseInteract.single_course)
+    await students(message, session, state)
 
 
 class AddPublication(StatesGroup):
@@ -297,31 +376,14 @@ async def change_course_name_start(message: Message, state: FSMContext):
 async def change_course_name_confirmed(message: Message, session: AsyncSession, state: FSMContext):
     data = await state.get_data()
     course_id = data['course_id']
-
-    # Удаление всех студентов, связанных с курсом
-    stmt = delete(CoursesStudents).where(CoursesStudents.course_id == course_id)
-    await session.execute(stmt)
-    # Удаление всех медиафайлов, связанных с публикациями, связанными с курсом
-    stmt = delete(Media).where(
-        Media.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))
-    await session.execute(stmt)
-
-    stmt = delete(Publications).where(Publications.course_id == course_id)
-    await session.execute(stmt)
-
-    # Удаление курса
-    stmt = delete(Courses).where(Courses.id == course_id)
-    await session.execute(stmt)
-
-    await session.commit()
-
+    await delete_course(session, course_id)
     await message.reply(
         f'Course have been deleted',
         reply_markup=kb.courses)
+    await state.clear()
     await tutor_courses(message, session)
-    await state.set_state(CourseInteract.single_course)
 
 
-@router.message(Teacher(), EditCourse.name_confirm, F.text.casefold() == 'no')
-async def change_course_name_declined(message: Message, session: AsyncSession, state: FSMContext):
+@router.message(Teacher(), EditCourse.delete_confirm, F.text.casefold() == 'no')
+async def change_course_name_declined(message: Message, session: AsyncSession):
     await tutor_courses(message, session)

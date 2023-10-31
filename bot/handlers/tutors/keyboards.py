@@ -12,7 +12,8 @@ single_course = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text='Publications'),
      KeyboardButton(text='Edit course')],
     [KeyboardButton(text='Add publication'),
-     KeyboardButton(text='Home page')]
+     KeyboardButton(text='Students')],
+    [KeyboardButton(text='Home page')]
 ],
     resize_keyboard=True,
     input_field_placeholder='Choose option below')
@@ -25,7 +26,6 @@ edit_course = ReplyKeyboardMarkup(keyboard=[
 ],
     resize_keyboard=True,
     input_field_placeholder='Choose option below')
-
 
 ready = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text='Ready')]

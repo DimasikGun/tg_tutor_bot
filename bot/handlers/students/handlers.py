@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import CoursesStudents, Courses
 from handlers.common.pagination import pagination_handler, Pagination
+from handlers.common.queries import get_publications
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
     single_publication
 from handlers.students import keyboards as kb
@@ -32,10 +33,14 @@ async def student_course_info(callback: CallbackQuery, session: AsyncSession, st
     await course_info(callback, session, state, kb, course_id)
 
 
-@router.callback_query(CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))))
+@router.callback_query(CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))),
+                       Pagination.filter(F.entity_type == 'publications'))
 async def pagination_handler_student(query: CallbackQuery, callback_data: Pagination, session: AsyncSession,
                                      state: FSMContext):
-    await pagination_handler(query, callback_data, session, state)
+    data = await state.get_data()
+    course_id = data['course_id']
+    posts = await get_publications(session, course_id)
+    await pagination_handler(query, callback_data, posts)
 
 
 @router.message(F.text == 'Publications', CourseInteract.single_course)
