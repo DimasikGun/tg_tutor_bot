@@ -15,6 +15,7 @@ from handlers.common.services import CourseInteract, publications, create_inline
     single_publication
 from handlers.tutors import keyboards as kb
 from handlers.tutors.filters import Teacher
+from handlers.tutors.services import student_name_builder
 
 router = Router()
 
@@ -77,8 +78,9 @@ async def students(message: Message, session: AsyncSession, state: FSMContext):
     if students:
         pag = paginator(entity_type='students')
         builder = InlineKeyboardBuilder()
-        for students in students:
-            builder.row(InlineKeyboardButton(text=students.username, callback_data=f'student_{students.user_id}'))
+        for student in students:
+            student_name = await student_name_builder(student)
+            builder.row(InlineKeyboardButton(text=student_name, callback_data=f'student_{student.user_id}'))
 
         builder.row(*pag.buttons, width=2)
         await state.set_state(CourseInteract.single_course)
@@ -95,11 +97,17 @@ class Students(StatesGroup):
 @router.callback_query(Teacher(), F.data.startswith('student_'), CourseInteract.single_course)
 async def single_student(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     student_id = int(callback.data[8:])
-    stmt = select(Users.username).where(Users.user_id == student_id)
+    stmt = select(Users).where(Users.user_id == student_id)
     result = await session.execute(stmt)
     student = result.scalar()
+    if student.username:
+        student_name = '@' + student.username
+    elif student.first_name:
+        student_name = student.first_name
+    else:
+        student_name = callback.data
     await callback.answer()
-    await callback.message.answer(f'Do you want to delete {student} from your course?',
+    await callback.message.answer(f'Do you want to delete {student_name} from your course?',
                                   reply_markup=ReplyKeyboardMarkup(
                                       keyboard=[
                                           [
@@ -129,6 +137,7 @@ async def delete_student_confirmed(message: Message, session: AsyncSession, stat
 async def delete_student_declined(message: Message, session: AsyncSession, state: FSMContext):
     await state.set_state(CourseInteract.single_course)
     await students(message, session, state)
+    await message.answer('Or choose an option below:', reply_markup=kb.single_course)
 
 
 class AddPublication(StatesGroup):

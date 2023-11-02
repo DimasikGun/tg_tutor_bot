@@ -5,6 +5,8 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from handlers.tutors.services import student_name_builder
+
 
 class Pagination(CallbackData, prefix='pag'):
     action: str
@@ -51,7 +53,8 @@ async def pagination_handler(query: CallbackQuery, callback_data: Pagination, re
                 builder.row(InlineKeyboardButton(text=records[i].title, callback_data=f'publication_{records[i].id}'))
         elif callback_data.entity_type == 'students':
             for i in range(start_index, end_index):
-                builder.row(InlineKeyboardButton(text=records[i].username, callback_data=f'student_{records[i].user_id}'))
+                student_name = await student_name_builder(i)
+                builder.row(InlineKeyboardButton(text=student_name, callback_data=f'student_{records[i].user_id}'))
 
         builder.row(*pag.buttons, width=2)
         await query.message.edit_reply_markup(reply_markup=builder.as_markup())

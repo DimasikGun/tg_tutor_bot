@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.common import keyboards as kb
 from db import Users
+from handlers.common.queries import create_user
 
 router = Router()
 
@@ -27,13 +28,11 @@ async def give_role(callback: CallbackQuery, session: AsyncSession):
         await callback.answer('You`ve already chosen', show_alert=True)
     else:
         if callback.data == 'student':
-            await session.merge(
-                Users(user_id=callback.from_user.id, username=callback.from_user.username, is_teacher=False))
+            await create_user(session, callback, is_teacher=False)
             await callback.answer('Ok, i get it, Ur a student')
             await callback.message.answer('Now choose one option below', reply_markup=kb.main)
         else:
-            await session.merge(
-                Users(user_id=callback.from_user.id, username=callback.from_user.username, is_teacher=True))
+            await create_user(session, callback, is_teacher=True)
             await callback.answer('Ok, i get it, Ur a teacher')
             await callback.message.answer('Now choose one option below', reply_markup=kb.main)
         await session.commit()

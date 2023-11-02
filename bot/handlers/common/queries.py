@@ -12,6 +12,13 @@ async def get_publications(session: AsyncSession, course_id: int) -> Sequence:
     return posts
 
 
+async def create_user(session, callback, is_teacher):
+    await session.merge(
+        Users(user_id=callback.from_user.id, username=callback.from_user.username,
+              first_name=callback.from_user.first_name, second_name=callback.from_user.last_name,
+              is_teacher=is_teacher))
+
+
 async def get_students(session: AsyncSession, course_id: int) -> Sequence:
     stmt = select(Users).join(CoursesStudents).where(Courses.id == course_id)
     result = await session.execute(stmt)

@@ -18,6 +18,8 @@ class Users(BaseModel):
 
     user_id = Column(BigInteger, unique=True, nullable=False, primary_key=True, autoincrement=False)  # tg user id
     username = Column(String(32), nullable=True)
+    first_name = Column(String(64), nullable=True)
+    second_name = Column(String(64), nullable=True)
     is_teacher = Column(Boolean, default=False)
     reg_date = Column(DateTime(), default=datetime.now())
     upd_date = Column(DateTime(), default=datetime.now(), onupdate=datetime.now())
