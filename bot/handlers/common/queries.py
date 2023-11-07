@@ -44,3 +44,11 @@ async def delete_course(session: AsyncSession, course_id: int) -> None:
     stmt = delete(Courses).where(Courses.id == course_id)
     await session.execute(stmt)
     await session.commit()
+
+
+async def delete_publication_query(session: AsyncSession, publication_id: int) -> None:
+    stmt = delete(Media).where(Media.publication == publication_id)
+    await session.execute(stmt)
+    stmt = delete(Publications).where(Publications.id == publication_id)
+    await session.execute(stmt)
+    await session.commit()

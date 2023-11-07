@@ -1,3 +1,6 @@
+import re
+from datetime import datetime
+
 from aiogram import Router, F
 from aiogram.enums import ContentType
 from aiogram.fsm.context import FSMContext
@@ -9,8 +12,9 @@ from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import Courses, Publications, Media, Users, CoursesStudents
+from handlers.common.keyboards import choose
 from handlers.common.pagination import pagination_handler, Pagination, paginator
-from handlers.common.queries import get_students, get_code, delete_course, get_publications
+from handlers.common.queries import get_students, get_code, delete_course, get_publications, delete_publication_query
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
     single_publication
 from handlers.tutors import keyboards as kb
@@ -107,13 +111,10 @@ async def single_student(callback: CallbackQuery, session: AsyncSession, state: 
     else:
         student_name = callback.data
     await callback.answer()
+    keyboard = choose
+    keyboard.keyboard.pop()
     await callback.message.answer(f'Do you want to delete {student_name} from your course?',
-                                  reply_markup=ReplyKeyboardMarkup(
-                                      keyboard=[
-                                          [
-                                              KeyboardButton(text="Yes"),
-                                              KeyboardButton(text="No"),
-                                          ]], resize_keyboard=True))
+                                  reply_markup=keyboard)
     await state.set_state(Students.delete_confirm)
     await state.update_data(student_id=student_id)
 
@@ -123,7 +124,8 @@ async def delete_student_confirmed(message: Message, session: AsyncSession, stat
     data = await state.get_data()
     course_id = data['course_id']
     student_id = data['student_id']
-    stmt = delete(CoursesStudents).where(CoursesStudents.course_id == course_id and CoursesStudents.user_id == student_id)
+    stmt = delete(CoursesStudents).where(
+        CoursesStudents.course_id == course_id and CoursesStudents.user_id == student_id)
     await session.execute(stmt)
     await session.commit()
     await message.reply(
@@ -144,6 +146,8 @@ class AddPublication(StatesGroup):
     title = State()
     text = State()
     media = State()
+    date = State()
+    time = State()
 
 
 @router.message(Teacher(), F.text == 'Add publication', CourseInteract.single_course)
@@ -179,45 +183,24 @@ async def add_publication_text(message: Message, state: FSMContext):
 
 
 @router.message(Teacher(), F.text == 'Ready', AddPublication.media)
-async def add_publication_preview(message: Message, session: AsyncSession, state: FSMContext):
+async def add_publication_ready(message: Message, session: AsyncSession, state: FSMContext):
     data = await state.get_data()
-    media_group = []
-    audio = []
-    documents = []
 
     publication = await session.merge(Publications(title=data['title'], course_id=data['course_id'], text=data['text']))
     await session.commit()
-    await message.reply(
-        f'Your post have been created. It will look like this:',
-        reply_markup=kb.single_course)
 
     for media in data['media']:
         await session.merge(Media(media_type=media[0], file_id=media[1], publication=publication.id))
-        await session.commit()
-        if media[0] == str(ContentType.PHOTO):
-            media_group.append(InputMediaPhoto(media=media[1]))
-        elif media[0] == str(ContentType.VIDEO):
-            media_group.append(InputMediaVideo(media=media[1]))
-        elif media[0] == str(ContentType.AUDIO):
-            audio.append(InputMediaAudio(media=media[1]))
-        else:
-            documents.append(InputMediaDocument(media=media[1]))
 
-    await message.answer(f'<b>{data["title"]}</b>\n{data["text"]}', parse_mode='HTML')
-
-    if media_group:
-        await message.answer_media_group(media_group)
-    if documents:
-        await message.answer('Documents:')
-        await message.answer_media_group(documents)
-    if audio:
-        await message.answer('Audio:')
-        await message.answer_media_group(audio)
-    await publications_teacher(message, session, state)
+    await session.commit()
+    await message.answer('All media have been added')
+    await state.set_state(AddPublication.date)
+    await state.update_data(publication_id=publication.id, date=None, time=None)
+    await message.answer('Now enter finish date(dd.mm.yyyy) or press "Ready" button', reply_markup=kb.ready)
 
 
 @router.message(Teacher(), AddPublication.media)
-async def add_publication_media(message: Message, state: FSMContext):
+async def add_publication_media(message: Message, session: AsyncSession, state: FSMContext):
     message_type = message.content_type
     data = await state.get_data()
 
@@ -243,14 +226,106 @@ async def add_publication_media(message: Message, state: FSMContext):
         await message.answer('Not supported media type, try something else')
 
     if len(data['media']) >= 20:
-        await add_publication_preview(message, state)  # Pass the message and state to the function
+        await add_publication_ready(message, session, state)
+
+
+async def add_publication_preview(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+    date_obj = None
+    time_obj = None
+
+    try:
+        date_obj = datetime.strptime(data['date'], "%d.%m.%Y")
+    except (TypeError, ValueError):
+        pass
+
+    if 'time' in data and data['time']:
+        try:
+            time_obj = datetime.strptime(data['time'], "%H:%M")
+        except (TypeError, ValueError):
+            pass
+
+    if date_obj is not None:
+        if time_obj is not None:
+            date_time = datetime.combine(date_obj, time_obj.time())
+        else:
+            date_time = date_obj
+    else:
+        date_time = None
+
+    stmt = update(Publications).where(Publications.id == data['publication_id']).values(finish_date=date_time)
+    await session.execute(stmt)
+    await session.commit()
+    await state.set_state(CourseInteract.single_course)
+    await message.answer('Publication has been added', reply_markup=kb.single_course)
+    await publications_teacher(message, session, state)
+
+
+@router.message(Teacher(), AddPublication.date)
+async def add_publication_date(message: Message, session: AsyncSession, state: FSMContext):
+    date_pattern = r'\d{2}.\d{2}.\d{4}'
+    if message.text == 'Ready':
+        await add_publication_preview(message, session, state)
+    elif not re.match(date_pattern, message.text.strip()):
+        await message.answer('Wrong date pattern, try again')
+        await state.set_state(AddPublication.date)
+    else:
+        await state.set_state(AddPublication.time)
+        await state.update_data(date=message.text)
+        await message.answer('Now enter finish time (hh:mm) or press "Ready" button')
+
+
+@router.message(Teacher(), AddPublication.time)
+async def add_publication_time(message: Message, session: AsyncSession, state: FSMContext):
+    time_pattern = r'\d{2}:\d{2}'
+    if message.text == 'Ready':
+        await add_publication_preview(message, session, state)
+    elif not re.match(time_pattern, message.text.strip()):
+        await message.answer('Wrong time pattern, try again')
+        await state.set_state(AddPublication.time)
+    else:
+        await state.update_data(time=message.text)
+        await add_publication_preview(message, session, state)
+
+
+class PublicationInteract(StatesGroup):
+    single_publication = State()
 
 
 @router.callback_query(Teacher(), F.data.startswith('publication_'))
 async def teacher_single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     await single_publication(callback, session, state, kb)
+    await callback.message.answer('Choose what to do with publication:', reply_markup=ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text='Edit'),
+                KeyboardButton(text='Delete'),
+            ],
+            [KeyboardButton(text='Go back')]
+        ], resize_keyboard=True))
+    await state.set_state(PublicationInteract.single_publication)
+    await state.update_data(publication_id=int(callback.data[12:]))
+
+
+@router.message(Teacher(), PublicationInteract.single_publication, F.text == 'Edit')
+async def edit_publication(message: Message, session: AsyncSession, state: FSMContext):
+    await message.answer('Publication has been edited', reply_markup=kb.single_course)
+
+
+@router.message(Teacher(), PublicationInteract.single_publication, F.text == 'Delete')
+async def delete_publication(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+    await delete_publication_query(session, data['publication_id'])
+    await message.answer('Publication has been deleted', reply_markup=kb.single_course)
     await state.set_state(CourseInteract.single_course)
-    await publications_teacher(callback.message, session, state)
+    await publications_teacher(message, session, state)
+
+
+@router.message(Teacher(), PublicationInteract.single_publication, F.text == 'Go back')
+async def publication_go_back(message: Message, session: AsyncSession, state: FSMContext):
+    await message.answer('No further actions with publication', reply_markup=kb.single_course)
+    await state.set_state(CourseInteract.single_course)
+    await publications_teacher(message, session, state)
 
 
 class AddCourse(StatesGroup):
@@ -276,14 +351,7 @@ async def add_course(message: Message, state: FSMContext):
         # If the name is acceptable, move to the AddCourse.confirm state
         await state.update_data(name=message.text)
         await state.set_state(AddCourse.confirm)
-        await message.answer(f'Are you sure with name: "{message.text}"?', reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [
-                    KeyboardButton(text="Yes"),
-                    KeyboardButton(text="No"),
-                ],
-                [KeyboardButton(text="Cancel")]
-            ], resize_keyboard=True))
+        await message.answer(f'Are you sure with name: "{message.text}"?', reply_markup=choose)
 
 
 @router.message(F.text.casefold() == "cancel")
@@ -370,15 +438,10 @@ async def add_course_unknown(message: Message):
 
 @router.message(Teacher(), F.text == 'Delete course', CourseInteract.single_course)
 async def change_course_name_start(message: Message, state: FSMContext):
-    data = await state.get_data()
+    keyboard = choose
+    keyboard.keyboard.pop()
     await state.set_state(EditCourse.delete_confirm)
-    await message.answer(f'Are you sure you want to delete your course?',
-                         reply_markup=ReplyKeyboardMarkup(
-                             keyboard=[
-                                 [
-                                     KeyboardButton(text="Yes"),
-                                     KeyboardButton(text="No"),
-                                 ]], resize_keyboard=True))
+    await message.answer(f'Are you sure you want to delete your course?', reply_markup=keyboard)
 
 
 @router.message(Teacher(), EditCourse.delete_confirm, F.text.casefold() == 'yes')

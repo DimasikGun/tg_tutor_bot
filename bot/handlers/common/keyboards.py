@@ -4,7 +4,6 @@ start = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='I am a student', callback_data='student'),
      InlineKeyboardButton(text='I am a teacher', callback_data='teacher')]])
 
-
 main = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text='My courses'),
      KeyboardButton(text='Profile')],
@@ -12,3 +11,13 @@ main = ReplyKeyboardMarkup(keyboard=[
 ],
     resize_keyboard=True,
     input_field_placeholder='Choose option below')
+
+choose = ReplyKeyboardMarkup(
+    keyboard=[
+        [
+            KeyboardButton(text='Yes'),
+            KeyboardButton(text='No'),
+        ],
+        [KeyboardButton(text='Cancel')]
+    ], resize_keyboard=True)
+

@@ -81,8 +81,9 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
             audio.append(InputMediaAudio(media=media.file_id))
         else:
             documents.append(InputMediaDocument(media=media.file_id))
-    await callback.message.answer(f'<b>{publication.title}</b>\n{publication.text}', parse_mode='HTML',
-                                  reply_markup=kb.single_course)
+    await callback.message.answer(
+        f'SUBMIT UNTIL: {publication.finish_date}\n<b>{publication.title}</b>\n{publication.text}', parse_mode='HTML',
+        reply_markup=kb.single_course)
 
     if media_group:
         await callback.message.answer_media_group(media_group)

@@ -17,7 +17,7 @@ async def cmd_start(message: Message):
 
 
 @router.message(F.text == 'Home page')
-async def cmd_start(message: Message):
+async def cmd_home(message: Message):
     await message.answer('Home page', reply_markup=kb.main)
 
 
