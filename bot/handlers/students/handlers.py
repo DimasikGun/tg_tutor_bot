@@ -6,10 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import CoursesStudents, Courses
-from handlers.common.pagination import pagination_handler, Pagination
 from handlers.common.queries import get_publications
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
-    single_publication
+    single_publication, Pagination, pagination_handler
 from handlers.students import keyboards as kb
 
 router = Router()

@@ -2,6 +2,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.common import keyboards as kb
@@ -12,8 +13,14 @@ router = Router()
 
 
 @router.message(Command('start'))
-async def cmd_start(message: Message):
-    await message.answer('Hello, are you a teacher or a student?', reply_markup=kb.start)
+async def cmd_start(message: Message, session: AsyncSession):
+    stmt = select(Users).where(Users.user_id == message.from_user.id)
+    result = await session.execute(stmt)
+    user = result.scalar()
+    if user:
+        await message.answer('Home page', reply_markup=kb.main)
+    else:
+        await message.answer('Hello, are you a teacher or a student?', reply_markup=kb.start)
 
 
 @router.message(F.text == 'Home page')

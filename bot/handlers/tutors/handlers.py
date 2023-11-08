@@ -1,25 +1,20 @@
-import re
-from datetime import datetime
-
 from aiogram import Router, F
-from aiogram.enums import ContentType
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, \
-    InputMediaPhoto, InputMediaVideo, InputMediaAudio, InputMediaDocument, InlineKeyboardButton
+    InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import Courses, Publications, Media, Users, CoursesStudents
 from handlers.common.keyboards import choose
-from handlers.common.pagination import pagination_handler, Pagination, paginator
 from handlers.common.queries import get_students, get_code, delete_course, get_publications, delete_publication_query
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
-    single_publication
+    single_publication, Pagination, pagination_handler, paginator, student_name_builder
 from handlers.tutors import keyboards as kb
 from handlers.tutors.filters import Teacher
-from handlers.tutors.services import student_name_builder
+from handlers.tutors.services import add_media, publication_date, publication_time
 
 router = Router()
 
@@ -193,7 +188,7 @@ async def add_publication_ready(message: Message, session: AsyncSession, state: 
         await session.merge(Media(media_type=media[0], file_id=media[1], publication=publication.id))
 
     await session.commit()
-    await message.answer('All media have been added')
+    await message.answer('Publication has been created')
     await state.set_state(AddPublication.date)
     await state.update_data(publication_id=publication.id, date=None, time=None)
     await message.answer('Now enter finish date(dd.mm.yyyy) or press "Ready" button', reply_markup=kb.ready)
@@ -201,95 +196,32 @@ async def add_publication_ready(message: Message, session: AsyncSession, state: 
 
 @router.message(Teacher(), AddPublication.media)
 async def add_publication_media(message: Message, session: AsyncSession, state: FSMContext):
-    message_type = message.content_type
+    await state.set_state(AddPublication.media)
     data = await state.get_data()
-
-    if message_type in (
-            ContentType.VIDEO, ContentType.AUDIO, ContentType.DOCUMENT):
-        file_id = eval(f"message.{message_type}.file_id")
-        await state.set_state(AddPublication.media)
-        media = data['media']
-        media.append((str(message_type), file_id))
-        await state.update_data(media=media)  # Update the 'media' key in data
-        await message.answer('Media added, add more or press "Ready"')
-
-    elif message_type == ContentType.PHOTO:
-        file_id = message.photo[-1].file_id
-        await state.set_state(AddPublication.media)
-        media = data['media']
-        media.append((str(message_type), file_id))
-        await state.update_data(media=media)  # Update the 'media' key in data
-        await message.answer('Media added, add more or press "Ready"')
-
-    else:
-        await state.set_state(AddPublication.media)
-        await message.answer('Not supported media type, try something else')
-
     if len(data['media']) >= 20:
         await add_publication_ready(message, session, state)
-
-
-async def add_publication_preview(message: Message, session: AsyncSession, state: FSMContext):
-    data = await state.get_data()
-    date_obj = None
-    time_obj = None
-
-    try:
-        date_obj = datetime.strptime(data['date'], "%d.%m.%Y")
-    except (TypeError, ValueError):
-        pass
-
-    if 'time' in data and data['time']:
-        try:
-            time_obj = datetime.strptime(data['time'], "%H:%M")
-        except (TypeError, ValueError):
-            pass
-
-    if date_obj is not None:
-        if time_obj is not None:
-            date_time = datetime.combine(date_obj, time_obj.time())
-        else:
-            date_time = date_obj
     else:
-        date_time = None
-
-    stmt = update(Publications).where(Publications.id == data['publication_id']).values(finish_date=date_time)
-    await session.execute(stmt)
-    await session.commit()
-    await state.set_state(CourseInteract.single_course)
-    await message.answer('Publication has been added', reply_markup=kb.single_course)
-    await publications_teacher(message, session, state)
+        await add_media(message, session, state, data)
 
 
 @router.message(Teacher(), AddPublication.date)
 async def add_publication_date(message: Message, session: AsyncSession, state: FSMContext):
-    date_pattern = r'\d{2}.\d{2}.\d{4}'
-    if message.text == 'Ready':
-        await add_publication_preview(message, session, state)
-    elif not re.match(date_pattern, message.text.strip()):
-        await message.answer('Wrong date pattern, try again')
-        await state.set_state(AddPublication.date)
-    else:
-        await state.set_state(AddPublication.time)
-        await state.update_data(date=message.text)
-        await message.answer('Now enter finish time (hh:mm) or press "Ready" button')
+    await publication_date(message, session, state, AddPublication.date, AddPublication.time)
 
 
 @router.message(Teacher(), AddPublication.time)
 async def add_publication_time(message: Message, session: AsyncSession, state: FSMContext):
-    time_pattern = r'\d{2}:\d{2}'
-    if message.text == 'Ready':
-        await add_publication_preview(message, session, state)
-    elif not re.match(time_pattern, message.text.strip()):
-        await message.answer('Wrong time pattern, try again')
-        await state.set_state(AddPublication.time)
-    else:
-        await state.update_data(time=message.text)
-        await add_publication_preview(message, session, state)
+    await publication_time(message, session, state, AddPublication.time)
 
 
 class PublicationInteract(StatesGroup):
-    single_publication = State()
+    interact = State()
+    edit = State()
+    title_confirm = State()
+    text_confirm = State()
+    media_confirm = State()
+    date_confirm = State()
+    time_confirm = State()
 
 
 @router.callback_query(Teacher(), F.data.startswith('publication_'))
@@ -303,16 +235,125 @@ async def teacher_single_publication(callback: CallbackQuery, session: AsyncSess
             ],
             [KeyboardButton(text='Go back')]
         ], resize_keyboard=True))
-    await state.set_state(PublicationInteract.single_publication)
+    await state.set_state(PublicationInteract.interact)
     await state.update_data(publication_id=int(callback.data[12:]))
 
 
-@router.message(Teacher(), PublicationInteract.single_publication, F.text == 'Edit')
+@router.message(Teacher(), PublicationInteract.interact, F.text == 'Edit')
 async def edit_publication(message: Message, session: AsyncSession, state: FSMContext):
-    await message.answer('Publication has been edited', reply_markup=kb.single_course)
+    await state.set_state(PublicationInteract.edit)
+    await message.answer('What would you like to edit?', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text='Title', callback_data='title'),
+         InlineKeyboardButton(text='Text', callback_data='text')],
+        [InlineKeyboardButton(text='Media', callback_data='media'),
+         InlineKeyboardButton(text='Submit date', callback_data='submit_date')]]))
 
 
-@router.message(Teacher(), PublicationInteract.single_publication, F.text == 'Delete')
+@router.callback_query(Teacher(), PublicationInteract.edit, F.data == 'title')
+async def edit_title(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer('Enter a title of your publication')
+    await state.set_state(PublicationInteract.title_confirm)
+
+
+@router.message(Teacher(), PublicationInteract.title_confirm)
+async def edit_title_confirm(message: Message, session: AsyncSession, state: FSMContext):
+    if len(message.text) >= 35:
+        await state.set_state(PublicationInteract.title_confirm)
+        await message.answer('Title is too long, try shorter')
+    else:
+        data = await state.get_data()
+        stmt = update(Publications).where(Publications.id == data['publication_id']).values(title=message.text)
+        await session.execute(stmt)
+        await session.commit()
+        await message.answer('Title has been changed')
+        await state.set_state(CourseInteract.single_course)
+        await publications_teacher(message, session, state)
+
+
+@router.callback_query(Teacher(), PublicationInteract.edit, F.data == 'text')
+async def edit_title(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer('Enter a text of your publication')
+    await state.set_state(PublicationInteract.text_confirm)
+
+
+@router.message(Teacher(), PublicationInteract.text_confirm)
+async def edit_title_confirm(message: Message, session: AsyncSession, state: FSMContext):
+    if len(message.text) >= 4096:
+        await state.set_state(PublicationInteract.text_confirm)
+        await message.answer('Text is too long, try shorter')
+    else:
+        data = await state.get_data()
+        stmt = update(Publications).where(Publications.id == data['publication_id']).values(text=message.text)
+        await session.execute(stmt)
+        await session.commit()
+        await message.answer('Text has been changed')
+        await state.set_state(CourseInteract.single_course)
+        await publications_teacher(message, session, state)
+
+
+@router.message(Teacher(), F.text == 'Ready', PublicationInteract.media_confirm)
+async def edit_media_ready(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+
+    if len(data['media']) == 0:
+        await message.answer('Nothing to add, all media stayed the same', reply_markup=kb.single_course)
+        await state.set_state(CourseInteract.single_course)
+        await publications_teacher(message, session, state)
+
+    else:
+        stmt = delete(Media).where(Media.publication == data['publication_id'])
+        await session.execute(stmt)
+        await session.commit()
+        for media in data['media']:
+            await session.merge(Media(media_type=media[0], file_id=media[1], publication=data['publication_id']))
+        await session.commit()
+        await message.answer('All media have been added', reply_markup=kb.single_course)
+        await state.set_state(CourseInteract.single_course)
+        await publications_teacher(message, session, state)
+
+
+@router.callback_query(Teacher(), PublicationInteract.edit, F.data == 'media')
+async def edit_media(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer(
+        'All media from this publication will be deleted, so you will add it from the very beginning\nNow send media or press "Ready button to leave the same',
+        reply_markup=kb.ready)
+    await state.update_data(media=[])
+    await state.set_state(PublicationInteract.media_confirm)
+
+
+@router.message(Teacher(), PublicationInteract.media_confirm)
+async def edit_media_confirm(message: Message, session: AsyncSession, state: FSMContext):
+    await state.set_state(PublicationInteract.media_confirm)
+    data = await state.get_data()
+    if len(data['media']) >= 20:
+        await edit_media_ready(message, session, state)
+    else:
+        await add_media(message, session, state, data)
+
+
+@router.callback_query(Teacher(), PublicationInteract.edit, F.data == 'submit_date')
+async def edit_datetime(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer('Now enter submit date (dd:mm:yyyy) or press "Ready" button to clear it',
+                                  reply_markup=kb.ready)
+    await state.update_data(date=None, time=None)
+    await state.set_state(PublicationInteract.date_confirm)
+
+
+@router.message(Teacher(), PublicationInteract.date_confirm)
+async def edit_date(message: Message, session: AsyncSession, state: FSMContext):
+    await publication_date(message, session, state, PublicationInteract.date_confirm, PublicationInteract.time_confirm)
+
+
+@router.message(Teacher(), PublicationInteract.time_confirm)
+async def add_publication_time(message: Message, session: AsyncSession, state: FSMContext):
+    await publication_time(message, session, state, PublicationInteract.time_confirm)
+
+
+@router.message(Teacher(), PublicationInteract.interact, F.text == 'Delete')
 async def delete_publication(message: Message, session: AsyncSession, state: FSMContext):
     data = await state.get_data()
     await delete_publication_query(session, data['publication_id'])
@@ -321,7 +362,7 @@ async def delete_publication(message: Message, session: AsyncSession, state: FSM
     await publications_teacher(message, session, state)
 
 
-@router.message(Teacher(), PublicationInteract.single_publication, F.text == 'Go back')
+@router.message(Teacher(), PublicationInteract.interact, F.text == 'Go back')
 async def publication_go_back(message: Message, session: AsyncSession, state: FSMContext):
     await message.answer('No further actions with publication', reply_markup=kb.single_course)
     await state.set_state(CourseInteract.single_course)
