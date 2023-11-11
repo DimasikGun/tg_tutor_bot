@@ -1,7 +1,7 @@
 from sqlalchemy import select, Sequence, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import Courses, CoursesStudents, Media, Publications, Users
+from db import Courses, CoursesStudents, Media, Publications, Users, Submissions
 
 
 async def get_publications(session: AsyncSession, course_id: int) -> Sequence:
@@ -52,3 +52,10 @@ async def delete_publication_query(session: AsyncSession, publication_id: int) -
     stmt = delete(Publications).where(Publications.id == publication_id)
     await session.execute(stmt)
     await session.commit()
+
+
+async def get_submissions(session: AsyncSession, publication_id: int) -> Sequence:
+    stmt = select(Submissions).where(Submissions.publication == publication_id).limit(5)
+    result = await session.execute(stmt)
+    submissions = result.scalars().all()
+    return submissions

@@ -33,3 +33,13 @@ ready = ReplyKeyboardMarkup(keyboard=[
     resize_keyboard=True,
     input_field_placeholder='Press a button when you are ready'
 )
+
+publication_interact = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text='Edit'),
+                KeyboardButton(text='Delete'),
+                KeyboardButton(text='Submissions'),
+            ],
+            [KeyboardButton(text='Go back')]
+        ], resize_keyboard=True)

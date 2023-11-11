@@ -44,28 +44,6 @@ async def add_publication_preview(message: Message, session: AsyncSession, state
     await publications(message, session, state, kb)
 
 
-async def add_media(message: Message, session: AsyncSession, state: FSMContext, data):
-    message_type = message.content_type
-
-    if message_type in (
-            ContentType.VIDEO, ContentType.AUDIO, ContentType.DOCUMENT):
-        file_id = eval(f"message.{message_type}.file_id")
-        media = data['media']
-        media.append((str(message_type), file_id))
-        await state.update_data(media=media)  # Update the 'media' key in data
-        await message.answer('Media added, add more or press "Ready"')
-
-    elif message_type == ContentType.PHOTO:
-        file_id = message.photo[-1].file_id
-        media = data['media']
-        media.append((str(message_type), file_id))
-        await state.update_data(media=media)  # Update the 'media' key in data
-        await message.answer('Media added, add more or press "Ready"')
-
-    else:
-        await message.answer('Not supported media type, try something else')
-
-
 async def publication_date(message: Message, session: AsyncSession, state: FSMContext, state_name_re,
                            state_name_next):
     date_pattern = r'\d{2}.\d{2}.\d{4}'

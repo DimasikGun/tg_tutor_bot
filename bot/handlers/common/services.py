@@ -11,7 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import Publications, Courses, Media
+from db import Publications, Courses, Media, Submissions, Users
 
 
 async def student_name_builder(student):
@@ -22,6 +22,14 @@ async def student_name_builder(student):
     else:
         student_name = f'student_{student.user_id}'
     return student_name
+
+
+async def submission_name_builder(session, student_id):
+    stmt = select(Users).where(Users.user_id == student_id)
+    result = await session.execute(stmt)
+    user = result.scalar()
+
+    return await student_name_builder(user)
 
 
 class Pagination(CallbackData, prefix='pag'):
@@ -42,7 +50,7 @@ def paginator(page: int = 0, entity_type: str = 'publications'):
     return builder
 
 
-async def pagination_handler(query: CallbackQuery, callback_data: Pagination, records):
+async def pagination_handler(query: CallbackQuery, callback_data: Pagination, records, session = None):
     page_num = int(callback_data.page)
 
     if callback_data.action == 'next':
@@ -71,6 +79,10 @@ async def pagination_handler(query: CallbackQuery, callback_data: Pagination, re
             for i in range(start_index, end_index):
                 student_name = await student_name_builder(i)
                 builder.row(InlineKeyboardButton(text=student_name, callback_data=f'student_{records[i].user_id}'))
+        else:
+            for i in range(start_index, end_index):
+                student_name = await submission_name_builder(session, records[i].student)
+                builder.row(InlineKeyboardButton(text=student_name, callback_data=f'submission_{records[i].id}'))
 
         builder.row(*pag.buttons, width=2)
         await query.message.edit_reply_markup(reply_markup=builder.as_markup())
@@ -124,15 +136,32 @@ async def course_info(callback: CallbackQuery, session: AsyncSession, state: FSM
         await callback.message.answer('Course not found', reply_markup=kb.courses)
 
 
-async def single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext, kb):
+async def single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext, kb, user='teacher'):
     media_group = []
     audio = []
     documents = []
-
     publication_id = int(callback.data[12:])
     stmt = select(Publications).where(Publications.id == publication_id)
     result = await session.execute(stmt)
     publication = result.scalar()
+    if user == 'student':
+        stmt = select(Submissions).where(
+            Submissions.publication == publication_id and Submissions.student == callback.message.from_user.id)
+        result = await session.execute(stmt)
+        submission = result.scalar()
+        if submission:
+            if submission.grade:
+                await callback.message.answer(f'Grade: {submission.grade}/{publication.max_grade}',
+                                              reply_markup=kb.publication_interact_submitted)
+            else:
+                await callback.message.answer(f'Not graded. Max. grade: {publication.max_grade}',
+                                              reply_markup=kb.publication_interact_submitted)
+
+        else:
+            await callback.message.answer(f'Max. grade: {publication.max_grade}',
+                                          reply_markup=kb.publication_interact_not_submitted)
+    else:
+        await callback.message.answer(f'Max. grade: {publication.max_grade}', reply_markup=kb.publication_interact)
 
     query = select(Media).where(Media.publication == publication_id)
     result = await session.execute(query)
@@ -147,9 +176,13 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
             audio.append(InputMediaAudio(media=media.file_id))
         else:
             documents.append(InputMediaDocument(media=media.file_id))
+
     await callback.message.answer(
-        f'SUBMIT UNTIL: {publication.finish_date}\n<b>{publication.title}</b>\n{publication.text}', parse_mode='HTML',
-        reply_markup=kb.single_course)
+        f'SUBMIT UNTIL: {publication.finish_date}\n<b>{publication.title}</b>\n{publication.text}',
+        parse_mode='HTML',
+        reply_markup=kb.single_course) if publication.finish_date is not None else await callback.message.answer(
+        f'<b>{publication.title}</b>\n{publication.text}',
+        parse_mode='HTML')
 
     if media_group:
         await callback.message.answer_media_group(media_group)
@@ -160,3 +193,25 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
         await callback.message.answer('Audio:')
         await callback.message.answer_media_group(audio)
     await callback.answer()
+
+
+async def add_media(message: Message, session: AsyncSession, state: FSMContext, data):
+    message_type = message.content_type
+
+    if message_type in (
+            ContentType.VIDEO, ContentType.AUDIO, ContentType.DOCUMENT):
+        file_id = eval(f"message.{message_type}.file_id")
+        media = data['media']
+        media.append((str(message_type), file_id))
+        await state.update_data(media=media)  # Update the 'media' key in data
+        await message.answer('Media added, add more or press "Ready"')
+
+    elif message_type == ContentType.PHOTO:
+        file_id = message.photo[-1].file_id
+        media = data['media']
+        media.append((str(message_type), file_id))
+        await state.update_data(media=media)  # Update the 'media' key in data
+        await message.answer('Media added, add more or press "Ready"')
+
+    else:
+        await message.answer('Not supported media type, try something else')

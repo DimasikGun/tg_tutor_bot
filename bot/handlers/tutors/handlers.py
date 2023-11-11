@@ -1,20 +1,22 @@
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery, \
+from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery, \
     InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import Courses, Publications, Media, Users, CoursesStudents
+from db import Courses, Publications, Media, Users, CoursesStudents, Submissions
 from handlers.common.keyboards import choose
-from handlers.common.queries import get_students, get_code, delete_course, get_publications, delete_publication_query
+from handlers.common.queries import get_students, get_code, delete_course, get_publications, delete_publication_query, \
+    get_submissions
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
-    single_publication, Pagination, pagination_handler, paginator, student_name_builder
+    single_publication, Pagination, pagination_handler, paginator, student_name_builder, add_media, \
+    submission_name_builder
 from handlers.tutors import keyboards as kb
 from handlers.tutors.filters import Teacher
-from handlers.tutors.services import add_media, publication_date, publication_time
+from handlers.tutors.services import publication_date, publication_time
 
 router = Router()
 
@@ -137,10 +139,17 @@ async def delete_student_declined(message: Message, session: AsyncSession, state
     await message.answer('Or choose an option below:', reply_markup=kb.single_course)
 
 
+@router.message(Teacher(), Students.delete_confirm)
+async def delete_student_other(message: Message, state: FSMContext):
+    await state.set_state(Students.delete_confirm)
+    await message.answer('Сhoose "Yes" or "No"')
+
+
 class AddPublication(StatesGroup):
     title = State()
     text = State()
     media = State()
+    grade = State()
     date = State()
     time = State()
 
@@ -189,9 +198,30 @@ async def add_publication_ready(message: Message, session: AsyncSession, state: 
 
     await session.commit()
     await message.answer('Publication has been created')
-    await state.set_state(AddPublication.date)
-    await state.update_data(publication_id=publication.id, date=None, time=None)
-    await message.answer('Now enter finish date(dd.mm.yyyy) or press "Ready" button', reply_markup=kb.ready)
+    await state.set_state(AddPublication.grade)
+    await state.update_data(publication_id=publication.id, max_grade=None)
+    await message.answer(
+        'Now enter a maximum grade for this task or press "Ready" to leave the publication without grading',
+        reply_markup=kb.ready)
+
+
+@router.message(Teacher(), AddPublication.grade)
+async def add_publication_grade(message: Message, session: AsyncSession, state: FSMContext):
+    if message.text == 'Ready':
+        await state.set_state(AddPublication.date)
+        await state.update_data(date=None, time=None)
+        await message.answer('Now enter finish date(dd.mm.yyyy) or press "Ready" button', reply_markup=kb.ready)
+    elif message.text.isdigit() and 0 < int(message.text) <= 100:
+        data = await state.get_data()
+        stmt = update(Publications).where(Publications.id == data['publication_id']).values(max_grade=int(message.text))
+        await session.execute(stmt)
+        await session.commit()
+        await state.set_state(AddPublication.date)
+        await state.update_data(date=None, time=None)
+        await message.answer('Now enter finish date(dd.mm.yyyy) or press "Ready" button', reply_markup=kb.ready)
+    else:
+        await state.set_state(AddPublication.grade)
+        await message.answer('Max grade must be greater then 0 and less or equals 100')
 
 
 @router.message(Teacher(), AddPublication.media)
@@ -227,16 +257,44 @@ class PublicationInteract(StatesGroup):
 @router.callback_query(Teacher(), F.data.startswith('publication_'))
 async def teacher_single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     await single_publication(callback, session, state, kb)
-    await callback.message.answer('Choose what to do with publication:', reply_markup=ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text='Edit'),
-                KeyboardButton(text='Delete'),
-            ],
-            [KeyboardButton(text='Go back')]
-        ], resize_keyboard=True))
     await state.set_state(PublicationInteract.interact)
     await state.update_data(publication_id=int(callback.data[12:]))
+
+
+@router.callback_query(Teacher(), PublicationInteract.interact, Pagination.filter(F.action.in_(('prev', 'next'))),
+                       Pagination.filter(F.entity_type == 'submissions'))
+async def pagination_handler_submissions(query: CallbackQuery, callback_data: Pagination, session: AsyncSession,
+                                         state: FSMContext):
+    data = await state.get_data()
+    submissions = await get_submissions(session, data['publication_id'])
+    await pagination_handler(query, callback_data, submissions, session)
+
+
+@router.message(Teacher(), F.text == 'Submissions', PublicationInteract.interact)
+async def submissions(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+    publication_id = data['publication_id']
+    stmt = select(Submissions).where(Submissions.publication == publication_id).limit(5)
+    res = await session.execute(stmt)
+    submissions = res.scalars().all()
+    if submissions:
+        pag = paginator(entity_type='submissions')
+        builder = InlineKeyboardBuilder()
+        for submission in submissions:
+            student_name = await submission_name_builder(session, submission.student)
+            builder.row(InlineKeyboardButton(text=student_name, callback_data=f'submission_{submission.id}'))
+
+        builder.row(*pag.buttons, width=2)
+        await state.set_state(PublicationInteract.interact)
+        await message.answer('Here is submissions:', reply_markup=builder.as_markup())
+    else:
+        await state.set_state(PublicationInteract.interact)
+        await message.answer('There is no any submissions yet', reply_markup=kb.single_course)
+
+
+@router.callback_query(Teacher(), F.data.startswith('submission_'))
+async def teacher_single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    ...
 
 
 @router.message(Teacher(), PublicationInteract.interact, F.text == 'Edit')
@@ -500,3 +558,9 @@ async def change_course_name_confirmed(message: Message, session: AsyncSession, 
 @router.message(Teacher(), EditCourse.delete_confirm, F.text.casefold() == 'no')
 async def change_course_name_declined(message: Message, session: AsyncSession):
     await tutor_courses(message, session)
+
+
+@router.message(Teacher(), EditCourse.delete_confirm)
+async def change_course_name_other(message: Message, state: FSMContext):
+    await state.set_state(EditCourse.delete_confirm)
+    await message.answer('Choose "yes" or "no"')

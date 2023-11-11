@@ -31,8 +31,21 @@ class Publications(BaseModel):
     title = Column(String(60), nullable=False)
     text = Column(Text, nullable=True)
     course_id = Column(Integer, ForeignKey('courses.id'))
+    max_grade = Column(Integer, nullable=True)
     add_date = Column(DateTime(), default=datetime.now())
     finish_date = Column(DateTime(), default=None, nullable=True)
+
+
+class Submissions(BaseModel):
+    __tablename__ = 'submissions'  # noqa
+
+    id = Column(Integer, unique=True, nullable=False, primary_key=True, autoincrement=True)
+    text = Column(Text, nullable=True)
+    publication = Column(Integer, ForeignKey('publications.id'))
+    student = Column(Integer, ForeignKey('users.user_id'))
+    grade = Column(Integer, nullable=True)
+    add_date = Column(DateTime(), default=datetime.now())
+    update_date = Column(DateTime(), default=datetime.now(), onupdate=datetime.now())
 
 
 class Media(BaseModel):
@@ -41,4 +54,5 @@ class Media(BaseModel):
     id = Column(Integer, unique=True, nullable=False, primary_key=True, autoincrement=True)
     file_id = Column(String(120), unique=True, primary_key=True, nullable=False, autoincrement=False)
     media_type = Column(String(30), nullable=False)
-    publication = Column(Integer, ForeignKey('publications.id'))
+    publication = Column(Integer, ForeignKey('publications.id'), nullable=True)
+    submission = Column(Integer, ForeignKey('submissions.id'), nullable=True)

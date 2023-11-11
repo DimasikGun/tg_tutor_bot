@@ -2,13 +2,14 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import CoursesStudents, Courses
+from db import CoursesStudents, Courses, Submissions, Media
+from handlers.common.keyboards import choose
 from handlers.common.queries import get_publications
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
-    single_publication, Pagination, pagination_handler
+    single_publication, Pagination, pagination_handler, add_media
 from handlers.students import keyboards as kb
 
 router = Router()
@@ -29,6 +30,7 @@ async def student_courses(message: Message, session: AsyncSession):
 @router.callback_query(F.data.startswith('course_'))
 async def student_course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     course_id = int(callback.data[7:])
+    # TODO: SHOW TEACHER`S NAME
     await course_info(callback, session, state, kb, course_id)
 
 
@@ -47,11 +49,114 @@ async def publications_student(message: Message, session: AsyncSession, state: F
     await publications(message, session, state, kb)
 
 
+class AddSubmission(StatesGroup):
+    single_publication = State()
+    delete = State()
+    text = State()
+    media = State()
+
+
 @router.callback_query(F.data.startswith('publication_'))
 async def student_single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    await single_publication(callback, session, state, kb)
+    await state.update_data(publication_id=int(callback.data[12:]))
+    await single_publication(callback, session, state, kb, 'student')
+    await state.set_state(AddSubmission.single_publication)
+
+
+@router.message(AddSubmission.single_publication, F.text == 'Add submission')
+async def add_submission(message: Message, state: FSMContext):
+    await message.answer('Enter a text of your submission or press "Ready" button to leave it blank',
+                         reply_markup=kb.ready)
+    await state.update_data(text=None, media=[])
+    await state.set_state(AddSubmission.text)
+
+
+@router.message(AddSubmission.text)
+async def submission_add_text(message: Message, state: FSMContext):
+    if message.text == 'Ready':
+        await message.answer('Now send media or press "Ready" button')
+        await state.set_state(AddSubmission.media)
+    elif len(message.text) >= 4096:
+        await state.set_state(AddSubmission.text)
+        await message.answer('Text is too long, try shorter')
+    else:
+        await message.answer('Text added, now send media or press "Ready" button')
+        await state.update_data(text=message.text)
+        await state.set_state(AddSubmission.media)
+
+
+@router.message(F.text == 'Ready', AddSubmission.media)
+async def add_publication_ready(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+
+    submission = await session.merge(
+        Submissions(text=data['text'], publication=data['publication_id'], student=message.from_user.id))
+    await session.commit()
+
+    for media in data['media']:
+        await session.merge(Media(media_type=media[0], file_id=media[1], submission=submission.id))
+    await session.commit()
+
+    await message.answer('Submission has been created', reply_markup=kb.single_course)
     await state.set_state(CourseInteract.single_course)
-    await publications_student(callback.message, session, state)
+    await publications(message, session, state, kb)
+
+
+@router.message(AddSubmission.media)
+async def submission_add_media(message: Message, session: AsyncSession, state: FSMContext):
+    await state.set_state(AddSubmission.media)
+    data = await state.get_data()
+    if len(data['media']) >= 20:
+        await add_publication_ready(message, session, state)
+    else:
+        await add_media(message, session, state, data)
+
+
+@router.message(AddSubmission.single_publication, F.text == 'Go back')
+async def publication_go_back(message: Message, session: AsyncSession, state: FSMContext):
+    await message.answer('No further actions with publication', reply_markup=kb.single_course)
+    await state.set_state(CourseInteract.single_course)
+    await publications(message, session, state, kb)
+
+
+@router.message(AddSubmission.single_publication, F.text == 'Delete submission')
+async def delete_submission(message: Message, state: FSMContext):
+    keyboard = choose
+    keyboard.keyboard.pop()
+    await message.answer('Are you sure you want to delete your submission?', reply_markup=keyboard)
+    await state.set_state(AddSubmission.delete)
+
+
+@router.message(AddSubmission.delete, F.text.casefold() == 'yes')
+async def delete_submission_confirmed(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+    stmt = delete(Media).where(
+        Media.submission.in_(select(Submissions.id).where(
+            Submissions.publication == data['publication_id'] and Submissions.student == message.from_user.id)))
+    await session.execute(stmt)
+    stmt = delete(Submissions).where(
+        Submissions.publication == data['publication_id'] and Submissions.student == message.from_user.id)
+    await session.execute(stmt)
+    await session.commit()
+    await message.reply(
+        f'Your submission has been deleted',
+        reply_markup=kb.single_course)
+    await state.set_state(CourseInteract.single_course)
+    await publications(message, session, state, kb)
+
+
+@router.message(AddSubmission.delete, F.text.casefold() == 'no')
+async def delete_submission_declined(message: Message, session: AsyncSession, state: FSMContext):
+    await state.set_state(CourseInteract.single_course)
+    await publications(message, session, state, kb)
+    await message.answer('Or choose an option below:', reply_markup=kb.single_course)
+
+
+@router.message(AddSubmission.delete)
+async def delete_submission_other(message: Message, session: AsyncSession, state: FSMContext):
+    await state.set_state(AddSubmission.delete)
+    await publications(message, session, state, kb)
+    await message.answer('Choose "Yes" or "No"', reply_markup=kb.single_course)
 
 
 class JoinCourse(StatesGroup):
