@@ -43,3 +43,15 @@ publication_interact = ReplyKeyboardMarkup(
             ],
             [KeyboardButton(text='Go back')]
         ], resize_keyboard=True)
+
+submission_graded = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='Change grade')],
+            [KeyboardButton(text='Go back')]
+        ], resize_keyboard=True)
+
+submission_not_graded = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='Grade')],
+            [KeyboardButton(text='Go back')]
+        ], resize_keyboard=True)

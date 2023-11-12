@@ -50,7 +50,7 @@ def paginator(page: int = 0, entity_type: str = 'publications'):
     return builder
 
 
-async def pagination_handler(query: CallbackQuery, callback_data: Pagination, records, session = None):
+async def pagination_handler(query: CallbackQuery, callback_data: Pagination, records, session=None):
     page_num = int(callback_data.page)
 
     if callback_data.action == 'next':
@@ -136,6 +136,29 @@ async def course_info(callback: CallbackQuery, session: AsyncSession, state: FSM
         await callback.message.answer('Course not found', reply_markup=kb.courses)
 
 
+async def media_sort(media_files, media_group: list, audio: list, documents: list):
+    for media in media_files:
+        if media.media_type == str(ContentType.PHOTO):
+            media_group.append(InputMediaPhoto(media=media.file_id))
+        elif media.media_type == str(ContentType.VIDEO):
+            media_group.append(InputMediaVideo(media=media.file_id))
+        elif media.media_type == str(ContentType.AUDIO):
+            audio.append(InputMediaAudio(media=media.file_id))
+        else:
+            documents.append(InputMediaDocument(media=media.file_id))
+
+
+async def media_group_send(message: Message, media_group: list, audio: list, documents: list):
+    if media_group:
+        await message.answer_media_group(media_group)
+    if documents:
+        await message.answer('Documents:')
+        await message.answer_media_group(documents)
+    if audio:
+        await message.answer('Audio:')
+        await message.answer_media_group(audio)
+
+
 async def single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext, kb, user='teacher'):
     media_group = []
     audio = []
@@ -167,31 +190,15 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
     result = await session.execute(query)
     media_files = result.scalars().all()
 
-    for media in media_files:
-        if media.media_type == str(ContentType.PHOTO):
-            media_group.append(InputMediaPhoto(media=media.file_id))
-        elif media.media_type == str(ContentType.VIDEO):
-            media_group.append(InputMediaVideo(media=media.file_id))
-        elif media.media_type == str(ContentType.AUDIO):
-            audio.append(InputMediaAudio(media=media.file_id))
-        else:
-            documents.append(InputMediaDocument(media=media.file_id))
+    await media_sort(media_files, media_group, audio, documents)
 
     await callback.message.answer(
         f'SUBMIT UNTIL: {publication.finish_date}\n<b>{publication.title}</b>\n{publication.text}',
-        parse_mode='HTML',
-        reply_markup=kb.single_course) if publication.finish_date is not None else await callback.message.answer(
+        parse_mode='HTML') if publication.finish_date is not None else await callback.message.answer(
         f'<b>{publication.title}</b>\n{publication.text}',
         parse_mode='HTML')
 
-    if media_group:
-        await callback.message.answer_media_group(media_group)
-    if documents:
-        await callback.message.answer('Documents:')
-        await callback.message.answer_media_group(documents)
-    if audio:
-        await callback.message.answer('Audio:')
-        await callback.message.answer_media_group(audio)
+    await media_group_send(callback.message, media_group, audio, documents)
     await callback.answer()
 
 
@@ -215,3 +222,34 @@ async def add_media(message: Message, session: AsyncSession, state: FSMContext, 
 
     else:
         await message.answer('Not supported media type, try something else')
+
+
+async def single_submission(message: Message, session: AsyncSession, submission, kb, max_grade, user='teacher'):
+    media_group = []
+    audio = []
+    documents = []
+
+    if submission.grade:
+        await message.answer(f'Grade: {submission.grade}/{max_grade}')
+    else:
+        await message.answer(f'Not graded. Max. grade: {max_grade}')
+
+    if user == 'teacher':
+        if submission.grade:
+            keyboard = kb.submission_graded
+        else:
+            keyboard = kb.submission_not_graded
+    else:
+        keyboard = kb.publication_interact_submitted
+
+    stmt = select(Media).where(Media.submission == submission.id)
+    result = await session.execute(stmt)
+    media_files = result.scalars().all()
+
+    await media_sort(media_files, media_group, audio, documents)
+
+    await message.answer(
+        f'SUBMITED: <b>{submission.add_date}</b>\n{submission.text}', reply_markup=keyboard,
+        parse_mode='HTML')
+
+    await media_group_send(message, media_group, audio, documents)

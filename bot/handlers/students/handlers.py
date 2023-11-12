@@ -5,11 +5,11 @@ from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import CoursesStudents, Courses, Submissions, Media
+from db import CoursesStudents, Courses, Submissions, Media, Publications
 from handlers.common.keyboards import choose
 from handlers.common.queries import get_publications
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
-    single_publication, Pagination, pagination_handler, add_media
+    single_publication, Pagination, pagination_handler, add_media, single_submission
 from handlers.students import keyboards as kb
 
 router = Router()
@@ -157,6 +157,20 @@ async def delete_submission_other(message: Message, session: AsyncSession, state
     await state.set_state(AddSubmission.delete)
     await publications(message, session, state, kb)
     await message.answer('Choose "Yes" or "No"', reply_markup=kb.single_course)
+
+
+@router.message(AddSubmission.single_publication, F.text == 'Watch submission')
+async def watch_submission(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+    stmt = select(Submissions).where(
+        Submissions.publication == data['publication_id'] and Submissions.student == message.from_user.id)
+    result = await session.execute(stmt)
+    submission = result.scalar()
+    stmt = select(Publications.max_grade).where(Publications.id == submission.publication)
+    result = await session.execute(stmt)
+    max_grade = result.scalar()
+    await single_submission(message, session, submission, kb, max_grade, 'student')
+    await state.set_state(AddSubmission.single_publication)
 
 
 class JoinCourse(StatesGroup):

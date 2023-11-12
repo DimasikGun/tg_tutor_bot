@@ -18,7 +18,8 @@ single_course = ReplyKeyboardMarkup(keyboard=[
 
 publication_interact_submitted = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text='Delete submission')],
+            [KeyboardButton(text='Delete submission'),
+             KeyboardButton(text='Watch submission')],
             [KeyboardButton(text='Go back')]
         ], resize_keyboard=True)
 

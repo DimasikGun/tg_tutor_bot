@@ -13,7 +13,7 @@ from handlers.common.queries import get_students, get_code, delete_course, get_p
     get_submissions
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
     single_publication, Pagination, pagination_handler, paginator, student_name_builder, add_media, \
-    submission_name_builder
+    submission_name_builder, single_submission
 from handlers.tutors import keyboards as kb
 from handlers.tutors.filters import Teacher
 from handlers.tutors.services import publication_date, publication_time
@@ -252,6 +252,8 @@ class PublicationInteract(StatesGroup):
     media_confirm = State()
     date_confirm = State()
     time_confirm = State()
+    grade_submission = State()
+    grade_confirm = State()
 
 
 @router.callback_query(Teacher(), F.data.startswith('publication_'))
@@ -288,13 +290,62 @@ async def submissions(message: Message, session: AsyncSession, state: FSMContext
         await state.set_state(PublicationInteract.interact)
         await message.answer('Here is submissions:', reply_markup=builder.as_markup())
     else:
-        await state.set_state(PublicationInteract.interact)
         await message.answer('There is no any submissions yet', reply_markup=kb.single_course)
 
 
 @router.callback_query(Teacher(), F.data.startswith('submission_'))
-async def teacher_single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    ...
+async def teacher_single_submission(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    stmt = select(Submissions).where(Submissions.id == int(callback.data[11:]))
+    result = await session.execute(stmt)
+    submission = result.scalar()
+    stmt = select(Publications.max_grade).where(Publications.id == submission.publication)
+    result = await session.execute(stmt)
+    max_grade = result.scalar()
+    await state.update_data(submission_id=submission.id, max_grade=max_grade)
+    await single_submission(callback.message, session, submission, kb, max_grade)
+    await callback.answer()
+    await state.set_state(PublicationInteract.grade_submission)
+
+
+@router.message(Teacher(), PublicationInteract.grade_submission, F.text.in_(('Change grade', 'Grade')))
+async def grade_submission(message: Message, state: FSMContext):
+    await message.answer('Enter a grade for submission', reply_markup=kb.ready)
+    await state.set_state(PublicationInteract.grade_confirm)
+    if message.text == 'Change grade':
+        await state.update_data(action='update')
+    else:
+        await state.update_data(action='grade')
+
+
+@router.message(Teacher(), PublicationInteract.grade_confirm)
+async def grade_submission_confirm(message: Message, session: AsyncSession, state: FSMContext):
+    data = await state.get_data()
+    if message.text == 'Ready':
+        await state.set_state(PublicationInteract.interact)
+        await message.answer('No further actions', reply_markup=kb.publication_interact)
+        await submissions(message, session, state)
+
+    elif message.text.isdigit() and 0 < int(message.text) <= data['max_grade']:
+        stmt = update(Submissions).where(Submissions.id == data['submission_id']).values(grade=int(message.text))
+        await session.execute(stmt)
+        await session.commit()
+        if data['action'] == 'update':
+            await message.answer('Grade hs been changed', reply_markup=kb.publication_interact)
+        else:
+            await message.answer('Submission has been graded', reply_markup=kb.publication_interact)
+
+        await state.set_state(PublicationInteract.interact)
+        await submissions(message, session, state)
+    else:
+        await state.set_state(PublicationInteract.grade_confirm)
+        await message.answer(f'Grade must be greater then 0 and less or equals to {data["max_grade"]}')
+
+
+@router.message(Teacher(), PublicationInteract.grade_submission, F.text == 'Go back')
+async def grade_go_back(message: Message, session: AsyncSession, state: FSMContext):
+    await state.set_state(PublicationInteract.interact)
+    await message.answer('No further actions with submissions', reply_markup=kb.publication_interact)
+    await submissions(message, session, state)
 
 
 @router.message(Teacher(), PublicationInteract.interact, F.text == 'Edit')
