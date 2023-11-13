@@ -11,6 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from __main__ import bot
 from db import Publications, Courses, Media, Submissions, Users
 
 
@@ -167,25 +168,30 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
     stmt = select(Publications).where(Publications.id == publication_id)
     result = await session.execute(stmt)
     publication = result.scalar()
-    if user == 'student':
-        stmt = select(Submissions).where(
-            Submissions.publication == publication_id and Submissions.student == callback.message.from_user.id)
-        result = await session.execute(stmt)
-        submission = result.scalar()
-        if submission:
-            if submission.grade:
-                await callback.message.answer(f'Grade: {submission.grade}/{publication.max_grade}',
-                                              reply_markup=kb.publication_interact_submitted)
+    if publication.max_grade:
+        if user == 'student':
+            stmt = select(Submissions).where(
+                Submissions.publication == publication_id and Submissions.student == callback.message.from_user.id)
+            result = await session.execute(stmt)
+            submission = result.scalar()
+            if submission:
+                if submission.grade:
+                    await callback.message.answer(f'Grade: {submission.grade}/{publication.max_grade}',
+                                                  reply_markup=kb.publication_interact_submitted)
+                else:
+                    await callback.message.answer(f'Not graded. Max. grade: {publication.max_grade}',
+                                                  reply_markup=kb.publication_interact_submitted)
+
             else:
-                await callback.message.answer(f'Not graded. Max. grade: {publication.max_grade}',
-                                              reply_markup=kb.publication_interact_submitted)
-
+                await callback.message.answer(f'Max. grade: {publication.max_grade}',
+                                              reply_markup=kb.publication_interact_not_submitted)
         else:
-            await callback.message.answer(f'Max. grade: {publication.max_grade}',
-                                          reply_markup=kb.publication_interact_not_submitted)
+            await callback.message.answer(f'Max. grade: {publication.max_grade}', reply_markup=kb.publication_interact)
     else:
-        await callback.message.answer(f'Max. grade: {publication.max_grade}', reply_markup=kb.publication_interact)
-
+        if user == 'teacher':
+            await callback.message.answer(f'Here is publication', reply_markup=kb.publication_interact_unsubmitable)
+        else:
+            await callback.message.answer(f'Here is publication', reply_markup=kb.single_course)
     query = select(Media).where(Media.publication == publication_id)
     result = await session.execute(query)
     media_files = result.scalars().all()
@@ -253,3 +259,15 @@ async def single_submission(message: Message, session: AsyncSession, submission,
         parse_mode='HTML')
 
     await media_group_send(message, media_group, audio, documents)
+
+
+def bot_session_closer(func):
+    async def wrapper(*args, **kwargs):
+        s = bot.session
+        try:
+            result = await func(*args, **kwargs)
+        finally:
+            await s.close()
+        return result
+
+    return wrapper

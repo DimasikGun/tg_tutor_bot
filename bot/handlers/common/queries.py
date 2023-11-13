@@ -33,21 +33,45 @@ async def get_code(session: AsyncSession, course_id: int) -> str:
     return f'{course.key}{course.id}'
 
 
-async def delete_course(session: AsyncSession, course_id: int) -> None:
+async def delete_course(session: AsyncSession, course_id: int) -> tuple:
+    stmt = select(CoursesStudents.student_id).where(Courses.id == course_id)
+    res = await session.execute(stmt)
+    students = res.scalars().all()
+
     stmt = delete(CoursesStudents).where(CoursesStudents.course_id == course_id)
+    await session.execute(stmt)
+
+    stmt = delete(Media).where(
+        Media.submission.in_(select(Submissions.id).where(
+            Submissions.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))))
+    await session.execute(stmt)
+
+    stmt = delete(Submissions).where(
+        Submissions.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))
     await session.execute(stmt)
     stmt = delete(Media).where(
         Media.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))
     await session.execute(stmt)
     stmt = delete(Publications).where(Publications.course_id == course_id)
     await session.execute(stmt)
+
+    stmt = select(Courses.name).where(Courses.id == course_id)
+    res = await session.execute(stmt)
+    course_name = res.scalar()
+
     stmt = delete(Courses).where(Courses.id == course_id)
     await session.execute(stmt)
     await session.commit()
+    return course_name, students
 
 
 async def delete_publication_query(session: AsyncSession, publication_id: int) -> None:
     stmt = delete(Media).where(Media.publication == publication_id)
+    await session.execute(stmt)
+    stmt = delete(Media).where(
+        Media.submission.in_(select(Submissions.id).where(Submissions.publication == publication_id)))
+    await session.execute(stmt)
+    stmt = delete(Submissions).where(Submissions.publication == publication_id)
     await session.execute(stmt)
     stmt = delete(Publications).where(Publications.id == publication_id)
     await session.execute(stmt)
@@ -59,3 +83,19 @@ async def get_submissions(session: AsyncSession, publication_id: int) -> Sequenc
     result = await session.execute(stmt)
     submissions = result.scalars().all()
     return submissions
+
+
+async def delete_student_from_course(session, student, course):
+    stmt = delete(Media).where(
+        Media.submission.in_(select(Submissions.id).where(
+            Submissions.publication.in_(select(Publications.id).where(Publications.course_id == course)))))
+    await session.execute(stmt)
+
+    stmt = delete(Submissions).where(
+        Submissions.publication.in_(select(Publications.id).where(Publications.course_id == course)))
+    await session.execute(stmt)
+
+    stmt = delete(CoursesStudents).where(
+        CoursesStudents.course_id == course and CoursesStudents.user_id == student)
+    await session.execute(stmt)
+    await session.commit()

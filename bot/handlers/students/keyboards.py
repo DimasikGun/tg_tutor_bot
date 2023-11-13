@@ -10,7 +10,7 @@ courses = ReplyKeyboardMarkup(keyboard=[
 
 single_course = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text='Publications'),
-     KeyboardButton(text='Course info')],
+     KeyboardButton(text='Leave course')],
     [KeyboardButton(text='Home page')]
 ],
     resize_keyboard=True,

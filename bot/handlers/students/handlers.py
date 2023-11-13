@@ -6,11 +6,12 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import CoursesStudents, Courses, Submissions, Media, Publications
-from handlers.common.keyboards import choose
-from handlers.common.queries import get_publications
+from handlers.common.keyboards import choose, choose_ultimate
+from handlers.common.queries import get_publications, delete_student_from_course
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
     single_publication, Pagination, pagination_handler, add_media, single_submission
 from handlers.students import keyboards as kb
+from handlers.students.notifications import joined_course, added_submission, deleted_submission, left_course
 
 router = Router()
 
@@ -47,6 +48,33 @@ async def pagination_handler_student(query: CallbackQuery, callback_data: Pagina
 @router.message(F.text == 'Publications', CourseInteract.single_course)
 async def publications_student(message: Message, session: AsyncSession, state: FSMContext):
     await publications(message, session, state, kb)
+
+
+class LeaveCourse(StatesGroup):
+    leave_course_confim = State()
+
+
+@router.message(F.text == 'Leave course', CourseInteract.single_course)
+async def leave_course(message: Message, state: FSMContext):
+    await state.set_state(LeaveCourse.leave_course_confim)
+    await message.answer('Are you sure you want to leave this course?', reply_markup=choose_ultimate)
+
+
+@router.message(LeaveCourse.leave_course_confim)
+async def leave_course(message: Message, session: AsyncSession, state: FSMContext):
+    if message.text == 'Yes':
+        data = await state.get_data()
+        await delete_student_from_course(session, message.from_user.id, data['course_id'])
+        await left_course(session, data, message.from_user.id)
+        await state.set_state(CourseInteract.single_course)
+        await message.answer('You left the course', reply_markup=kb.single_course)
+
+    if message.text == 'No':
+        await state.set_state(CourseInteract.single_course)
+        await message.answer('You still in the course', reply_markup=kb.single_course)
+    else:
+        await state.set_state(LeaveCourse.leave_course_confim)
+        await message.answer('Choose "Yes" or "No"')
 
 
 class AddSubmission(StatesGroup):
@@ -97,7 +125,8 @@ async def add_publication_ready(message: Message, session: AsyncSession, state: 
         await session.merge(Media(media_type=media[0], file_id=media[1], submission=submission.id))
     await session.commit()
 
-    await message.answer('Submission has been created', reply_markup=kb.single_course)
+    await message.answer('Submission has been added', reply_markup=kb.single_course)
+    await added_submission(session, data)
     await state.set_state(CourseInteract.single_course)
     await publications(message, session, state, kb)
 
@@ -121,9 +150,7 @@ async def publication_go_back(message: Message, session: AsyncSession, state: FS
 
 @router.message(AddSubmission.single_publication, F.text == 'Delete submission')
 async def delete_submission(message: Message, state: FSMContext):
-    keyboard = choose
-    keyboard.keyboard.pop()
-    await message.answer('Are you sure you want to delete your submission?', reply_markup=keyboard)
+    await message.answer('Are you sure you want to delete your submission?', reply_markup=choose_ultimate)
     await state.set_state(AddSubmission.delete)
 
 
@@ -141,6 +168,7 @@ async def delete_submission_confirmed(message: Message, session: AsyncSession, s
     await message.reply(
         f'Your submission has been deleted',
         reply_markup=kb.single_course)
+    await deleted_submission(session, data)
     await state.set_state(CourseInteract.single_course)
     await publications(message, session, state, kb)
 
@@ -184,7 +212,7 @@ async def add_course_start(message: Message, state: FSMContext):
 
 
 @router.message(JoinCourse.join)
-async def add_course(message: Message, state: FSMContext, session: AsyncSession):
+async def join_course(message: Message, state: FSMContext, session: AsyncSession):
     # Extract the code from the message text
     code = message.text
     try:
@@ -204,6 +232,7 @@ async def add_course(message: Message, state: FSMContext, session: AsyncSession)
     try:
         # If the course exists, get its name
         name = res.name
+        teacher = res.teacher
         # Check if there is an existing record in CoursesStudents for this user and course
         stmt = select(CoursesStudents).where(
             CoursesStudents.course_id == course_id,
@@ -221,6 +250,7 @@ async def add_course(message: Message, state: FSMContext, session: AsyncSession)
             await session.merge(CoursesStudents(course_id=course_id, student_id=message.from_user.id))
             await session.commit()
             await message.answer(f'You`ve just joined a "{name}" course', reply_markup=kb.courses)
+            await joined_course(name, teacher)
             await student_courses(message, session)
 
     except AttributeError:

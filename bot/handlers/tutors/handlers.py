@@ -8,14 +8,16 @@ from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import Courses, Publications, Media, Users, CoursesStudents, Submissions
-from handlers.common.keyboards import choose
+from handlers.common.keyboards import choose, choose_ultimate
 from handlers.common.queries import get_students, get_code, delete_course, get_publications, delete_publication_query, \
-    get_submissions
+    get_submissions, delete_student_from_course
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
     single_publication, Pagination, pagination_handler, paginator, student_name_builder, add_media, \
     submission_name_builder, single_submission
 from handlers.tutors import keyboards as kb
 from handlers.tutors.filters import Teacher
+from handlers.tutors.notifications import publication_edited, submission_graded, student_kicked, publication_deleted, \
+    course_deleted, course_renamed
 from handlers.tutors.services import publication_date, publication_time
 
 router = Router()
@@ -108,10 +110,8 @@ async def single_student(callback: CallbackQuery, session: AsyncSession, state: 
     else:
         student_name = callback.data
     await callback.answer()
-    keyboard = choose
-    keyboard.keyboard.pop()
     await callback.message.answer(f'Do you want to delete {student_name} from your course?',
-                                  reply_markup=keyboard)
+                                  reply_markup=choose_ultimate)
     await state.set_state(Students.delete_confirm)
     await state.update_data(student_id=student_id)
 
@@ -121,13 +121,11 @@ async def delete_student_confirmed(message: Message, session: AsyncSession, stat
     data = await state.get_data()
     course_id = data['course_id']
     student_id = data['student_id']
-    stmt = delete(CoursesStudents).where(
-        CoursesStudents.course_id == course_id and CoursesStudents.user_id == student_id)
-    await session.execute(stmt)
-    await session.commit()
+    await delete_student_from_course(session, student_id, course_id)
     await message.reply(
         f'User have been deleted from your course',
         reply_markup=kb.single_course)
+    await student_kicked(session, data)
     await state.set_state(CourseInteract.single_course)
     await students(message, session, state)
 
@@ -236,12 +234,12 @@ async def add_publication_media(message: Message, session: AsyncSession, state: 
 
 @router.message(Teacher(), AddPublication.date)
 async def add_publication_date(message: Message, session: AsyncSession, state: FSMContext):
-    await publication_date(message, session, state, AddPublication.date, AddPublication.time)
+    await publication_date(message, session, state, AddPublication.date, AddPublication.time, 'created')
 
 
 @router.message(Teacher(), AddPublication.time)
 async def add_publication_time(message: Message, session: AsyncSession, state: FSMContext):
-    await publication_time(message, session, state, AddPublication.time)
+    await publication_time(message, session, state, AddPublication.time, 'updated')
 
 
 class PublicationInteract(StatesGroup):
@@ -301,7 +299,7 @@ async def teacher_single_submission(callback: CallbackQuery, session: AsyncSessi
     stmt = select(Publications.max_grade).where(Publications.id == submission.publication)
     result = await session.execute(stmt)
     max_grade = result.scalar()
-    await state.update_data(submission_id=submission.id, max_grade=max_grade)
+    await state.update_data(submission_id=submission.id, max_grade=max_grade, student_id=submission.student)
     await single_submission(callback.message, session, submission, kb, max_grade)
     await callback.answer()
     await state.set_state(PublicationInteract.grade_submission)
@@ -330,9 +328,11 @@ async def grade_submission_confirm(message: Message, session: AsyncSession, stat
         await session.execute(stmt)
         await session.commit()
         if data['action'] == 'update':
-            await message.answer('Grade hs been changed', reply_markup=kb.publication_interact)
+            await message.answer('Grade has been changed', reply_markup=kb.publication_interact)
         else:
             await message.answer('Submission has been graded', reply_markup=kb.publication_interact)
+
+        await submission_graded(session, data, message.text)
 
         await state.set_state(PublicationInteract.interact)
         await submissions(message, session, state)
@@ -376,6 +376,7 @@ async def edit_title_confirm(message: Message, session: AsyncSession, state: FSM
         await session.execute(stmt)
         await session.commit()
         await message.answer('Title has been changed')
+        await publication_edited(session, data)
         await state.set_state(CourseInteract.single_course)
         await publications_teacher(message, session, state)
 
@@ -398,6 +399,7 @@ async def edit_title_confirm(message: Message, session: AsyncSession, state: FSM
         await session.execute(stmt)
         await session.commit()
         await message.answer('Text has been changed')
+        await publication_edited(session, data)
         await state.set_state(CourseInteract.single_course)
         await publications_teacher(message, session, state)
 
@@ -420,6 +422,7 @@ async def edit_media_ready(message: Message, session: AsyncSession, state: FSMCo
         await session.commit()
         await message.answer('All media have been added', reply_markup=kb.single_course)
         await state.set_state(CourseInteract.single_course)
+        await publication_edited(session, data)
         await publications_teacher(message, session, state)
 
 
@@ -454,12 +457,13 @@ async def edit_datetime(callback: CallbackQuery, session: AsyncSession, state: F
 
 @router.message(Teacher(), PublicationInteract.date_confirm)
 async def edit_date(message: Message, session: AsyncSession, state: FSMContext):
-    await publication_date(message, session, state, PublicationInteract.date_confirm, PublicationInteract.time_confirm)
+    await publication_date(message, session, state, PublicationInteract.date_confirm, PublicationInteract.time_confirm,
+                           'created')
 
 
 @router.message(Teacher(), PublicationInteract.time_confirm)
-async def add_publication_time(message: Message, session: AsyncSession, state: FSMContext):
-    await publication_time(message, session, state, PublicationInteract.time_confirm)
+async def edit_time(message: Message, session: AsyncSession, state: FSMContext):
+    await publication_time(message, session, state, PublicationInteract.time_confirm, 'updated')
 
 
 @router.message(Teacher(), PublicationInteract.interact, F.text == 'Delete')
@@ -467,6 +471,7 @@ async def delete_publication(message: Message, session: AsyncSession, state: FSM
     data = await state.get_data()
     await delete_publication_query(session, data['publication_id'])
     await message.answer('Publication has been deleted', reply_markup=kb.single_course)
+    await publication_deleted(session, data)
     await state.set_state(CourseInteract.single_course)
     await publications_teacher(message, session, state)
 
@@ -565,12 +570,18 @@ async def change_course_name(message: Message, state: FSMContext):
 @router.message(Teacher(), EditCourse.name_confirm, F.text.casefold() == 'yes')
 async def change_course_name_confirmed(message: Message, session: AsyncSession, state: FSMContext):
     data = await state.get_data()
+
+    stmt = select(Courses.name).where(Courses.id == data['course_id'])
+    res = await session.execute(stmt)
+    old_name = res.scalar()
+
     stmt = update(Courses).where(Courses.id == data['course_id']).values(name=data['name'])
     await session.execute(stmt)
     await session.commit()
     await message.reply(
-        f'Course name have been changed to "{data["name"]}"',
+        f'Course "{old_name}" name have been changed to "{data["name"]}"',
         reply_markup=kb.courses)
+    await course_renamed(session, data, old_name)
     await tutor_courses(message, session)
     await state.set_state(CourseInteract.single_course)
 
@@ -587,21 +598,20 @@ async def add_course_unknown(message: Message):
 
 
 @router.message(Teacher(), F.text == 'Delete course', CourseInteract.single_course)
-async def change_course_name_start(message: Message, state: FSMContext):
-    keyboard = choose
-    keyboard.keyboard.pop()
+async def delete_course_start(message: Message, state: FSMContext):
     await state.set_state(EditCourse.delete_confirm)
-    await message.answer(f'Are you sure you want to delete your course?', reply_markup=keyboard)
+    await message.answer(f'Are you sure you want to delete your course?', reply_markup=choose_ultimate)
 
 
 @router.message(Teacher(), EditCourse.delete_confirm, F.text.casefold() == 'yes')
-async def change_course_name_confirmed(message: Message, session: AsyncSession, state: FSMContext):
+async def delete_course_confirmed(message: Message, session: AsyncSession, state: FSMContext):
     data = await state.get_data()
     course_id = data['course_id']
-    await delete_course(session, course_id)
+    data = await delete_course(session, course_id)
     await message.reply(
         f'Course have been deleted',
         reply_markup=kb.courses)
+    await course_deleted(data)
     await state.clear()
     await tutor_courses(message, session)
 

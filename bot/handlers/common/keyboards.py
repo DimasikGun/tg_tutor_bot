@@ -21,3 +21,11 @@ choose = ReplyKeyboardMarkup(
         [KeyboardButton(text='Cancel')]
     ], resize_keyboard=True)
 
+choose_ultimate = ReplyKeyboardMarkup(
+    keyboard=[
+        [
+            KeyboardButton(text='Yes'),
+            KeyboardButton(text='No'),
+        ]
+    ], resize_keyboard=True)
+
