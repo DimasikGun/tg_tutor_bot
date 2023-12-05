@@ -2,11 +2,11 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import CoursesStudents, Courses, Submissions, Media, Publications
-from handlers.common.keyboards import choose, choose_ultimate
+from db import CoursesStudents, Courses, Submissions, Media, Publications, Users
+from handlers.common.keyboards import choose_ultimate
 from handlers.common.queries import get_publications, delete_student_from_course
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
     single_publication, Pagination, pagination_handler, add_media, single_submission
@@ -16,23 +16,29 @@ from handlers.students.notifications import joined_course, added_submission, del
 router = Router()
 
 
+@router.message(F.text == 'Change role')
+async def tutor_courses(message: Message, session: AsyncSession):
+    stmt = update(Users).where(Users.user_id == message.from_user.id).values(is_teacher=True)
+    await session.execute(stmt)
+    await session.commit()
+    await message.answer('Now you are a teacher')
+
+
+@router.callback_query(Pagination.filter(F.action.in_(('prev', 'next'))),
+                       Pagination.filter(F.entity_type == 'courses'))
+async def pagination_handler_student(query: CallbackQuery, callback_data: Pagination, session: AsyncSession):
+    stmt = select(Courses).join(CoursesStudents).where(CoursesStudents.student_id == query.message.from_user.id)
+    res = await session.execute(stmt)
+    courses = res.scalars().all()
+    await pagination_handler(query, callback_data, courses)
+
+
 @router.message(F.text == 'My courses')
-async def student_courses(message: Message, session: AsyncSession):
-    stmt = select(Courses).join(CoursesStudents).filter(CoursesStudents.student_id == message.from_user.id)
-    result = await session.execute(stmt)
-    courses = result.scalars().all()
-
-    if courses:
-        await create_inline_courses(courses, message, kb)
-    else:
-        await message.answer('You haven`t joined any courses yet', reply_markup=kb.courses)
-
-
-@router.callback_query(F.data.startswith('course_'))
-async def student_course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    course_id = int(callback.data[7:])
-    # TODO: SHOW TEACHER`S NAME
-    await course_info(callback, session, state, kb, course_id)
+async def tutor_courses(message: Message, session: AsyncSession):
+    stmt = select(Courses).join(CoursesStudents).where(CoursesStudents.student_id == message.from_user.id).limit(5)
+    res = await session.execute(stmt)
+    courses = res.scalars().all()
+    await create_inline_courses(courses, message, kb)
 
 
 @router.callback_query(CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))),
@@ -213,10 +219,8 @@ async def add_course_start(message: Message, state: FSMContext):
 
 @router.message(JoinCourse.join)
 async def join_course(message: Message, state: FSMContext, session: AsyncSession):
-    # Extract the code from the message text
     code = message.text
     try:
-        # Parse the course_id and key from the code
         course_id = int(code[6:])
         key = str(code[:6])
     except ValueError:
@@ -224,16 +228,13 @@ async def join_course(message: Message, state: FSMContext, session: AsyncSession
         await message.answer('Wrong code', reply_markup=kb.courses)
         return
 
-    # Check if the provided course_id and key match a course in the database
     stmt = select(Courses).where(Courses.id == course_id and Courses.key == key)
     res = await session.execute(stmt)
     res = res.scalar()
 
     try:
-        # If the course exists, get its name
         name = res.name
         teacher = res.teacher
-        # Check if there is an existing record in CoursesStudents for this user and course
         stmt = select(CoursesStudents).where(
             CoursesStudents.course_id == course_id,
             CoursesStudents.student_id == message.from_user.id
@@ -242,10 +243,10 @@ async def join_course(message: Message, state: FSMContext, session: AsyncSession
         existing_record = res.scalar()
 
         if existing_record:
-            # If an existing record is found, inform the user
             await message.answer(f'You`ve already joined "{name}" course', reply_markup=kb.courses)
+        elif teacher == message.from_user.id:
+            await message.answer(f'You can`t join your own course', reply_markup=kb.courses)
         else:
-            # If no existing record is found, clear state, create a new CoursesStudents record, and commit the changes
             await state.clear()
             await session.merge(CoursesStudents(course_id=course_id, student_id=message.from_user.id))
             await session.commit()

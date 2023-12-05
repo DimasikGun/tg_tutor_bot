@@ -9,8 +9,8 @@ from bot.db.base import BaseModel
 class CoursesStudents(BaseModel):
     __tablename__ = 'courses_students'  # noqa
     id = Column(Integer, unique=True, nullable=False, primary_key=True, autoincrement=True)
-    course_id = Column(Integer, ForeignKey('courses.id'))
-    student_id = Column(Integer, ForeignKey('users.user_id'), index=True)
+    course_id = Column(BigInteger, ForeignKey('courses.id'))
+    student_id = Column(BigInteger, ForeignKey('users.user_id'), index=True)
 
 
 class Users(BaseModel):

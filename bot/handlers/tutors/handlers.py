@@ -23,15 +23,29 @@ from handlers.tutors.services import publication_date, publication_time
 router = Router()
 
 
-@router.message(Teacher(), F.text == 'My courses')
+@router.message(Teacher(), F.text == 'Change role')
 async def tutor_courses(message: Message, session: AsyncSession):
-    stmt = select(Courses).where(Courses.teacher == message.from_user.id)
+    stmt = update(Users).where(Users.user_id == message.from_user.id).values(is_teacher=False)
+    await session.execute(stmt)
+    await session.commit()
+    await message.answer('Now you are a student')
+
+
+@router.callback_query(Teacher(), Pagination.filter(F.action.in_(('prev', 'next'))),
+                       Pagination.filter(F.entity_type == 'courses'))
+async def pagination_handler_student(query: CallbackQuery, callback_data: Pagination, session: AsyncSession):
+    stmt = select(Courses).where(Courses.teacher == query.message.from_user.id)
     res = await session.execute(stmt)
     courses = res.scalars().all()
-    if courses:
-        await create_inline_courses(courses, message, kb)
-    else:
-        await message.answer('You don`t have any courses for now', reply_markup=kb.courses)
+    await pagination_handler(query, callback_data, courses)
+
+
+@router.message(Teacher(), F.text == 'My courses')
+async def tutor_courses(message: Message, session: AsyncSession):
+    stmt = select(Courses).where(Courses.teacher == message.from_user.id).limit(5)
+    res = await session.execute(stmt)
+    courses = res.scalars().all()
+    await create_inline_courses(courses, message, kb)
 
 
 @router.callback_query(Teacher(), F.data.startswith('course_'))

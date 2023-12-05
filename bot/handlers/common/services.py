@@ -60,12 +60,14 @@ async def pagination_handler(query: CallbackQuery, callback_data: Pagination, re
         else:
             page = page_num
             await query.answer('This is the last page')
+            return
     else:
         if page_num > 0:
             page = page_num - 1
         else:
             page = 0
             await query.answer('This is the first page')
+            return
 
     with suppress(TelegramBadRequest):
         pag = paginator(page, entity_type=callback_data.entity_type)
@@ -80,6 +82,9 @@ async def pagination_handler(query: CallbackQuery, callback_data: Pagination, re
             for i in range(start_index, end_index):
                 student_name = await student_name_builder(i)
                 builder.row(InlineKeyboardButton(text=student_name, callback_data=f'student_{records[i].user_id}'))
+        elif callback_data.entity_type == 'courses':
+            for i in range(start_index, end_index):
+                builder.row(InlineKeyboardButton(text=records[i].name, callback_data=f'course_{records[i].id}'))
         else:
             for i in range(start_index, end_index):
                 student_name = await submission_name_builder(session, records[i].student)
@@ -92,6 +97,20 @@ async def pagination_handler(query: CallbackQuery, callback_data: Pagination, re
 
 class CourseInteract(StatesGroup):
     single_course = State()
+
+
+async def create_inline_courses(courses, message, kb):
+    if courses:
+        pag = paginator(entity_type='courses')
+        builder = InlineKeyboardBuilder()
+        for course in courses:
+            builder.row(InlineKeyboardButton(text=course.name, callback_data=f'course_{course.id}'))
+
+        builder.row(*pag.buttons, width=2)
+        await message.answer('Here is courses:', reply_markup=builder.as_markup())
+        await message.answer('Or an option below:', reply_markup=kb.courses)
+    else:
+        await message.answer('You don`t have any courses for now', reply_markup=kb.courses)
 
 
 async def publications(message: Message, session: AsyncSession, state: FSMContext, kb):
@@ -112,15 +131,6 @@ async def publications(message: Message, session: AsyncSession, state: FSMContex
     else:
         await state.set_state(CourseInteract.single_course)
         await message.answer('There is no any publications yet', reply_markup=kb.single_course)
-
-
-async def create_inline_courses(courses, message, kb):
-    builder = InlineKeyboardBuilder()
-    for course in courses:
-        builder.add(InlineKeyboardButton(text=course.name, callback_data=f'course_{course.id}'))
-    builder.adjust(2)
-    await message.answer('Choose a course:', reply_markup=builder.as_markup())
-    await message.answer('Or an option below:', reply_markup=kb.courses)
 
 
 # TODO: REMOVE REPETITIVE COURSE QUERY
@@ -259,15 +269,3 @@ async def single_submission(message: Message, session: AsyncSession, submission,
         parse_mode='HTML')
 
     await media_group_send(message, media_group, audio, documents)
-
-
-def bot_session_closer(func):
-    async def wrapper(*args, **kwargs):
-        s = bot.session
-        try:
-            result = await func(*args, **kwargs)
-        finally:
-            await s.close()
-        return result
-
-    return wrapper

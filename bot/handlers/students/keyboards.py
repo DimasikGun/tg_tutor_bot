@@ -1,8 +1,7 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 courses = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text='Join course'),
-     KeyboardButton(text='Profile')],
+    [KeyboardButton(text='Join course')],
     [KeyboardButton(text='Home page')]
 ],
     resize_keyboard=True,

@@ -20,7 +20,7 @@ async def create_user(session, callback, is_teacher):
 
 
 async def get_students(session: AsyncSession, course_id: int) -> Sequence:
-    stmt = select(Users).join(CoursesStudents).where(Courses.id == course_id)
+    stmt = select(Users).join(CoursesStudents).where(CoursesStudents.course_id == course_id)
     result = await session.execute(stmt)
     students = result.scalars().all()
     return students

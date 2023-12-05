@@ -1,7 +1,7 @@
 import random
 from datetime import datetime
 
-from sqlalchemy import Column, String, Integer, ForeignKey, Text, DateTime
+from sqlalchemy import Column, String, Integer, ForeignKey, Text, DateTime, BigInteger
 from sqlalchemy.orm import relationship
 
 from bot.db.base import BaseModel
@@ -20,7 +20,7 @@ class Courses(BaseModel):
     id = Column(Integer, unique=True, nullable=False, primary_key=True, autoincrement=True)
     name = Column(String(30), nullable=False)
     key = Column(String(6), default=generate_random_code())
-    teacher = Column(Integer, ForeignKey('users.user_id'))
+    teacher = Column(BigInteger, ForeignKey('users.user_id'))
     students = relationship('CoursesStudents', backref='courses')
 
 
@@ -42,7 +42,7 @@ class Submissions(BaseModel):
     id = Column(Integer, unique=True, nullable=False, primary_key=True, autoincrement=True)
     text = Column(Text, nullable=True)
     publication = Column(Integer, ForeignKey('publications.id'))
-    student = Column(Integer, ForeignKey('users.user_id'))
+    student = Column(BigInteger, ForeignKey('users.user_id'))
     grade = Column(Integer, nullable=True)
     add_date = Column(DateTime(), default=datetime.now())
     update_date = Column(DateTime(), default=datetime.now(), onupdate=datetime.now())

@@ -6,8 +6,7 @@ start = InlineKeyboardMarkup(inline_keyboard=[
 
 main = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text='My courses'),
-     KeyboardButton(text='Profile')],
-    [KeyboardButton(text='Support')]
+     KeyboardButton(text='Change role')]
 ],
     resize_keyboard=True,
     input_field_placeholder='Choose option below')

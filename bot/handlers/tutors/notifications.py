@@ -4,10 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from __main__ import bot
 from db import Courses, CoursesStudents, Publications
 from handlers.common.keyboards import main
-from handlers.common.services import bot_session_closer
 
 
-@bot_session_closer
 async def publication_added(session: AsyncSession, data):
     stmt = select(Courses.name).where(Courses.id == data['course_id'])
     result = await session.execute(stmt)
@@ -20,7 +18,6 @@ async def publication_added(session: AsyncSession, data):
         await bot.send_message(chat_id=student, text=f'New publication in course "{course_name}"', reply_markup=main)
 
 
-@bot_session_closer
 async def student_kicked(session, data):
     stmt = select(Courses.name).where(Courses.id == data['course_id'])
     result = await session.execute(stmt)
@@ -29,7 +26,6 @@ async def student_kicked(session, data):
                            reply_markup=main)
 
 
-@bot_session_closer
 async def course_renamed(session, data, old_name):
     stmt = select(CoursesStudents.student_id).where(CoursesStudents.course_id == data['course_id'])
     result = await session.execute(stmt)
@@ -41,7 +37,6 @@ async def course_renamed(session, data, old_name):
                                reply_markup=main)
 
 
-@bot_session_closer
 async def course_deleted(data):
     course_name, students = data
 
@@ -51,7 +46,6 @@ async def course_deleted(data):
                                reply_markup=main)
 
 
-@bot_session_closer
 async def publication_deleted(session, data):
     stmt = select(Courses.name).where(Courses.id == data['course_id'])
     result = await session.execute(stmt)
@@ -67,7 +61,6 @@ async def publication_deleted(session, data):
                                reply_markup=main)
 
 
-@bot_session_closer
 async def publication_edited(session, data):
     stmt = select(Courses.name).where(Courses.id == data['course_id'])
     result = await session.execute(stmt)
@@ -88,7 +81,6 @@ async def publication_edited(session, data):
                                reply_markup=main)
 
 
-@bot_session_closer
 async def submission_graded(session, data, grade):
     stmt = select(Publications.title).where(Publications.id == data['publication_id'])
     result = await session.execute(stmt)

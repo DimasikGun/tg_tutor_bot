@@ -3,16 +3,14 @@ from sqlalchemy import select
 from __main__ import bot
 from db import Courses, Publications, Users
 from handlers.common.keyboards import main
-from handlers.common.services import bot_session_closer, student_name_builder
+from handlers.common.services import student_name_builder
 
 
-@bot_session_closer
 async def joined_course(name, teacher):
     await bot.send_message(chat_id=teacher, text=f'New student just joined your "{name}" course',
                            reply_markup=main)
 
 
-@bot_session_closer
 async def left_course(session, data, student):
     stmt = select(Users).where(Users.user_id == student)
     result = await session.execute(stmt)
@@ -28,7 +26,6 @@ async def left_course(session, data, student):
                            reply_markup=main)
 
 
-@bot_session_closer
 async def added_submission(session, data):
     stmt = select(Courses.name, Courses.teacher).where(Courses.id == data['course_id'])
     result = await session.execute(stmt)
@@ -43,7 +40,6 @@ async def added_submission(session, data):
                            reply_markup=main)
 
 
-@bot_session_closer
 async def deleted_submission(session, data):
     stmt = select(Courses.name, Courses.teacher).where(Courses.id == data['course_id'])
     result = await session.execute(stmt)
