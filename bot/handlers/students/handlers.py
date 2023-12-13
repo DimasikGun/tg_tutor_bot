@@ -2,14 +2,14 @@ from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
-from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import CoursesStudents, Courses, Submissions, Media, Publications, Users
+from db.queries import get_publications, delete_student_from_course, change_role_to_teacher, get_courses_student, \
+    create_submission, get_single_submission_student, get_course_by_key, \
+    get_single_coursestudent, join_course_student, create_media
 from handlers.common.keyboards import choose_ultimate
-from handlers.common.queries import get_publications, delete_student_from_course
-from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
-    single_publication, Pagination, pagination_handler, add_media, single_submission
+from handlers.common.services import CourseInteract, publications, create_inline_courses, single_publication, \
+    Pagination, pagination_handler, add_media, single_submission
 from handlers.students import keyboards as kb
 from handlers.students.notifications import joined_course, added_submission, deleted_submission, left_course
 
@@ -17,27 +17,21 @@ router = Router()
 
 
 @router.message(F.text == 'Change role')
-async def tutor_courses(message: Message, session: AsyncSession):
-    stmt = update(Users).where(Users.user_id == message.from_user.id).values(is_teacher=True)
-    await session.execute(stmt)
-    await session.commit()
+async def change_role_student(message: Message, session: AsyncSession):
+    await change_role_to_teacher(session, message.from_user.id)
     await message.answer('Now you are a teacher')
 
 
 @router.callback_query(Pagination.filter(F.action.in_(('prev', 'next'))),
                        Pagination.filter(F.entity_type == 'courses'))
 async def pagination_handler_student(query: CallbackQuery, callback_data: Pagination, session: AsyncSession):
-    stmt = select(Courses).join(CoursesStudents).where(CoursesStudents.student_id == query.message.from_user.id)
-    res = await session.execute(stmt)
-    courses = res.scalars().all()
+    courses = await get_courses_student(session, query.message.from_user.id)
     await pagination_handler(query, callback_data, courses)
 
 
 @router.message(F.text == 'My courses')
-async def tutor_courses(message: Message, session: AsyncSession):
-    stmt = select(Courses).join(CoursesStudents).where(CoursesStudents.student_id == message.from_user.id).limit(5)
-    res = await session.execute(stmt)
-    courses = res.scalars().all()
+async def student_courses(message: Message, session: AsyncSession):
+    courses = await get_courses_student(session, message.from_user.id, 5)
     await create_inline_courses(courses, message, kb)
 
 
@@ -123,13 +117,10 @@ async def submission_add_text(message: Message, state: FSMContext):
 async def add_publication_ready(message: Message, session: AsyncSession, state: FSMContext):
     data = await state.get_data()
 
-    submission = await session.merge(
-        Submissions(text=data['text'], publication=data['publication_id'], student=message.from_user.id))
-    await session.commit()
+    submission = await create_submission(session, data, message.from_user.id)
 
     for media in data['media']:
-        await session.merge(Media(media_type=media[0], file_id=media[1], submission=submission.id))
-    await session.commit()
+        await create_media(session, media, submission=submission)
 
     await message.answer('Submission has been added', reply_markup=kb.single_course)
     await added_submission(session, data)
@@ -163,14 +154,7 @@ async def delete_submission(message: Message, state: FSMContext):
 @router.message(AddSubmission.delete, F.text.casefold() == 'yes')
 async def delete_submission_confirmed(message: Message, session: AsyncSession, state: FSMContext):
     data = await state.get_data()
-    stmt = delete(Media).where(
-        Media.submission.in_(select(Submissions.id).where(
-            Submissions.publication == data['publication_id'] and Submissions.student == message.from_user.id)))
-    await session.execute(stmt)
-    stmt = delete(Submissions).where(
-        Submissions.publication == data['publication_id'] and Submissions.student == message.from_user.id)
-    await session.execute(stmt)
-    await session.commit()
+    await delete_submission(session, data, message.from_user.id)
     await message.reply(
         f'Your submission has been deleted',
         reply_markup=kb.single_course)
@@ -196,13 +180,7 @@ async def delete_submission_other(message: Message, session: AsyncSession, state
 @router.message(AddSubmission.single_publication, F.text == 'Watch submission')
 async def watch_submission(message: Message, session: AsyncSession, state: FSMContext):
     data = await state.get_data()
-    stmt = select(Submissions).where(
-        Submissions.publication == data['publication_id'] and Submissions.student == message.from_user.id)
-    result = await session.execute(stmt)
-    submission = result.scalar()
-    stmt = select(Publications.max_grade).where(Publications.id == submission.publication)
-    result = await session.execute(stmt)
-    max_grade = result.scalar()
+    submission, max_grade = get_single_submission_student(session, data, message.from_user.id)
     await single_submission(message, session, submission, kb, max_grade, 'student')
     await state.set_state(AddSubmission.single_publication)
 
@@ -228,32 +206,24 @@ async def join_course(message: Message, state: FSMContext, session: AsyncSession
         await message.answer('Wrong code', reply_markup=kb.courses)
         return
 
-    stmt = select(Courses).where(Courses.id == course_id and Courses.key == key)
-    res = await session.execute(stmt)
-    res = res.scalar()
+    course = await get_course_by_key(session, course_id, key)
 
     try:
-        name = res.name
-        teacher = res.teacher
-        stmt = select(CoursesStudents).where(
-            CoursesStudents.course_id == course_id,
-            CoursesStudents.student_id == message.from_user.id
-        )
-        res = await session.execute(stmt)
-        existing_record = res.scalar()
+        name = course.name
+        teacher = course.teacher
 
-        if existing_record:
+        coursestudent = await get_single_coursestudent(session, course_id, message.from_user.id)
+
+        if coursestudent:
             await message.answer(f'You`ve already joined "{name}" course', reply_markup=kb.courses)
         elif teacher == message.from_user.id:
             await message.answer(f'You can`t join your own course', reply_markup=kb.courses)
         else:
             await state.clear()
-            await session.merge(CoursesStudents(course_id=course_id, student_id=message.from_user.id))
-            await session.commit()
+            await join_course_student(session, course_id, message.from_user.id)
             await message.answer(f'You`ve just joined a "{name}" course', reply_markup=kb.courses)
             await joined_course(name, teacher)
             await student_courses(message, session)
 
     except AttributeError:
-        # If there is no matching course, inform the user
-        await message.answer('There is no course with such code(', reply_markup=kb.courses)
+        await message.answer('There is no course with such code', reply_markup=kb.courses)

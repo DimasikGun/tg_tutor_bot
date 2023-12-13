@@ -2,21 +2,17 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.common import keyboards as kb
-from db import Users
-from handlers.common.queries import create_user
+from db.queries import create_user, get_user
 
 router = Router()
 
 
 @router.message(Command('start'))
 async def cmd_start(message: Message, session: AsyncSession):
-    stmt = select(Users).where(Users.user_id == message.from_user.id)
-    result = await session.execute(stmt)
-    user = result.scalar()
+    user = await get_user(session, message.from_user.id)
     if user:
         await message.answer('Home page', reply_markup=kb.main)
     else:
@@ -30,7 +26,7 @@ async def cmd_home(message: Message):
 
 @router.callback_query(F.data.in_(('student', 'teacher')))
 async def give_role(callback: CallbackQuery, session: AsyncSession):
-    user = await session.get(Users, callback.from_user.id)
+    user = await get_user(session, callback.message.from_user.id)
     if user:
         await callback.answer('You`ve already chosen', show_alert=True)
     else:

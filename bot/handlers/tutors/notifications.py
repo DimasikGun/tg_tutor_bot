@@ -1,38 +1,29 @@
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from __main__ import bot
-from db import Courses, CoursesStudents, Publications
+from db.queries import get_course_by_id, get_coursestudents, get_single_publication
 from handlers.common.keyboards import main
 
 
 async def publication_added(session: AsyncSession, data):
-    stmt = select(Courses.name).where(Courses.id == data['course_id'])
-    result = await session.execute(stmt)
-    course_name = result.scalar()
-    stmt = select(CoursesStudents.student_id).where(CoursesStudents.course_id == data['course_id'])
-    result = await session.execute(stmt)
-    students = result.scalars().all()
+    course = await get_course_by_id(session, data['course_id'])
+    students = await get_coursestudents(session, data)
 
     for student in students:
-        await bot.send_message(chat_id=student, text=f'New publication in course "{course_name}"', reply_markup=main)
+        await bot.send_message(chat_id=student.id, text=f'New publication in course "{course.name}"', reply_markup=main)
 
 
 async def student_kicked(session, data):
-    stmt = select(Courses.name).where(Courses.id == data['course_id'])
-    result = await session.execute(stmt)
-    course_name = result.scalar()
-    await bot.send_message(chat_id=data['student_id'], text=f'You have been kicked from "{course_name}"',
+    course = await get_course_by_id(session, data['course_id'])
+    await bot.send_message(chat_id=data['student_id'], text=f'You have been kicked from "{course.name}"',
                            reply_markup=main)
 
 
 async def course_renamed(session, data, old_name):
-    stmt = select(CoursesStudents.student_id).where(CoursesStudents.course_id == data['course_id'])
-    result = await session.execute(stmt)
-    students = result.scalars().all()
+    students = await get_coursestudents(session, data)
 
     for student in students:
-        await bot.send_message(chat_id=student,
+        await bot.send_message(chat_id=student.id,
                                text=f'Course "{old_name}" name have been changed to "{data["name"]}"',
                                reply_markup=main)
 
@@ -47,44 +38,33 @@ async def course_deleted(data):
 
 
 async def publication_deleted(session, data):
-    stmt = select(Courses.name).where(Courses.id == data['course_id'])
-    result = await session.execute(stmt)
-    course_name = result.scalar()
+    course = await get_course_by_id(session, data['course_id'])
 
-    stmt = select(CoursesStudents.student_id).where(CoursesStudents.course_id == data['course_id'])
-    result = await session.execute(stmt)
-    students = result.scalars().all()
+    students = await get_coursestudents(session, data)
 
     for student in students:
-        await bot.send_message(chat_id=student,
-                               text=f'Course "{course_name}" has been deleted',
+        await bot.send_message(chat_id=student.id,
+                               text=f'Course "{course.name}" has been deleted',
                                reply_markup=main)
 
 
 async def publication_edited(session, data):
-    stmt = select(Courses.name).where(Courses.id == data['course_id'])
-    result = await session.execute(stmt)
-    course_name = result.scalar()
+    course = await get_course_by_id(session, data['course_id'])
     if not data['title']:
-        stmt = select(Publications.title).where(Publications.id == data['publication_id'])
-        result = await session.execute(stmt)
-        publication_title = result.scalar()
+        publication = await get_single_publication(session, data['publication_id'])
+        publication_title = publication.title
     else:
         publication_title = data['title']
-    stmt = select(CoursesStudents.student_id).where(CoursesStudents.course_id == data['course_id'])
-    result = await session.execute(stmt)
-    students = result.scalars().all()
+    students = await get_coursestudents(session, data)
 
     for student in students:
-        await bot.send_message(chat_id=student,
-                               text=f'Publication "{publication_title}" in "{course_name}" has been edited',
+        await bot.send_message(chat_id=student.id,
+                               text=f'Publication "{publication_title}" in "{course.name}" has been edited',
                                reply_markup=main)
 
 
 async def submission_graded(session, data, grade):
-    stmt = select(Publications.title).where(Publications.id == data['publication_id'])
-    result = await session.execute(stmt)
-    publication_title = result.scalar()
+    publication = await get_single_publication(session, data['publication_id'])
     await bot.send_message(chat_id=data['student_id'],
-                           text=f'Your submission for "{publication_title}" was graded for {grade}/{data["max_grade"]}',
+                           text=f'Your submission for "{publication.title}" was graded for {grade}/{data["max_grade"]}',
                            reply_markup=main)

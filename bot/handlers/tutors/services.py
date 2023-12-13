@@ -1,15 +1,13 @@
 import re
 from datetime import datetime
 
-from aiogram.enums import ContentType
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
-from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from db.queries import edit_publication_datetime
 from handlers.common.services import CourseInteract, publications
 from handlers.tutors import keyboards as kb
-from db import Publications
 from handlers.tutors.notifications import publication_added, publication_edited
 
 
@@ -37,9 +35,7 @@ async def add_publication_preview(message: Message, session: AsyncSession, state
     else:
         date_time = None
 
-    stmt = update(Publications).where(Publications.id == data['publication_id']).values(finish_date=date_time)
-    await session.execute(stmt)
-    await session.commit()
+    await edit_publication_datetime(session, data, date_time)
     await state.set_state(CourseInteract.single_course)
     await message.answer('Submit date and time has been added', reply_markup=kb.single_course)
     if action == 'created':

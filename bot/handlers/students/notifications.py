@@ -1,7 +1,5 @@
-from sqlalchemy import select
-
 from __main__ import bot
-from db import Courses, Publications, Users
+from db.queries import get_user, get_course_by_id, get_single_publication
 from handlers.common.keyboards import main
 from handlers.common.services import student_name_builder
 
@@ -12,43 +10,27 @@ async def joined_course(name, teacher):
 
 
 async def left_course(session, data, student):
-    stmt = select(Users).where(Users.user_id == student)
-    result = await session.execute(stmt)
-    user = result.scalar()
+    user = await get_user(session, student)
     student_name = await student_name_builder(user)
 
-    stmt = select(Courses.name, Courses.teacher).where(Courses.id == data['course_id'])
-    result = await session.execute(stmt)
-    course = result.fetchone()
-
+    course = await get_course_by_id(session, data['course_id'])
     await bot.send_message(chat_id=course.teacher,
                            text=f'{student_name} just left your "{course.name}" course',
                            reply_markup=main)
 
 
 async def added_submission(session, data):
-    stmt = select(Courses.name, Courses.teacher).where(Courses.id == data['course_id'])
-    result = await session.execute(stmt)
-    course = result.fetchone()
-
-    stmt = select(Publications.title).where(Publications.id == data['publication_id'])
-    result = await session.execute(stmt)
-    publication_name = result.scalar()
-
+    course = await get_course_by_id(session, data['course_id'])
+    publication = await get_single_publication(session, data['publication_id'])
     await bot.send_message(chat_id=course.teacher,
-                           text=f'Student just added a new submission to "{publication_name}" in your "{course.name}" course',
+                           text=f'Student just added a new submission to "{publication.title}" in your "{course.name}" course',
                            reply_markup=main)
 
 
 async def deleted_submission(session, data):
-    stmt = select(Courses.name, Courses.teacher).where(Courses.id == data['course_id'])
-    result = await session.execute(stmt)
-    course = result.fetchone()
-
-    stmt = select(Publications.title).where(Publications.id == data['publication_id'])
-    result = await session.execute(stmt)
-    publication_name = result.scalar()
+    course = await get_course_by_id(session, data['course_id'])
+    publication = await get_single_publication(session, data['publication_id'])
 
     await bot.send_message(chat_id=course.teacher,
-                           text=f'Student just deleted his submission of "{publication_name}" in your "{course.name}" course',
+                           text=f'Student just deleted his submission of "{publication.title}" in your "{course.name}" course',
                            reply_markup=main)

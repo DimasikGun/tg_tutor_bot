@@ -1,10 +1,12 @@
 import asyncio
+import logging
 import os
+import sys
 
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from aiogram.fsm.storage.redis import RedisStorage
 
 from middlewares.db import DbSessionMiddleware
 
@@ -19,14 +21,14 @@ async def main():
 
     engine = create_async_engine(url=os.getenv('DB-URL'), echo=True)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
-    dp = Dispatcher(storage=MemoryStorage())  # TODO: CHANGE
+    dp = Dispatcher(storage=RedisStorage.from_url('redis://localhost:6379/0'))
     dp.update.middleware(DbSessionMiddleware(session_pool=sessionmaker))
     dp.include_routers(teacher_router, student_router, router)
     await dp.start_polling(bot)
 
 
-# TODO: remove  URL from alembic.ini
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

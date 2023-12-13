@@ -8,11 +8,10 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, InlineKeyboardButton, CallbackQuery, InputMediaPhoto, InputMediaVideo, \
     InputMediaAudio, InputMediaDocument
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from __main__ import bot
-from db import Publications, Courses, Media, Submissions, Users
+from db.queries import get_user, get_publications, get_course_by_id, get_single_publication, \
+    get_single_submission_by_student_and_publication, get_media
 
 
 async def student_name_builder(student):
@@ -26,10 +25,7 @@ async def student_name_builder(student):
 
 
 async def submission_name_builder(session, student_id):
-    stmt = select(Users).where(Users.user_id == student_id)
-    result = await session.execute(stmt)
-    user = result.scalar()
-
+    user = await get_user(session, student_id)
     return await student_name_builder(user)
 
 
@@ -114,11 +110,8 @@ async def create_inline_courses(courses, message, kb):
 
 
 async def publications(message: Message, session: AsyncSession, state: FSMContext, kb):
-    course_id = await state.get_data()
-    stmt = select(Publications).where(Publications.course_id == course_id['course_id']).order_by(
-        Publications.add_date.desc()).limit(5)
-    res = await session.execute(stmt)
-    posts = res.scalars().all()
+    data = await state.get_data()
+    posts = await get_publications(session, data['course_id'], 5)
     if posts:
         pag = paginator()
         builder = InlineKeyboardBuilder()
@@ -133,11 +126,8 @@ async def publications(message: Message, session: AsyncSession, state: FSMContex
         await message.answer('There is no any publications yet', reply_markup=kb.single_course)
 
 
-# TODO: REMOVE REPETITIVE COURSE QUERY
 async def course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext, kb, course_id):
-    stmt = select(Courses).where(Courses.id == course_id)
-    result = await session.execute(stmt)
-    course = result.scalar()
+    course = await get_course_by_id(session, course_id)
     if course:
         await state.set_state(CourseInteract.single_course)
         await state.update_data(course_id=course_id)
@@ -175,15 +165,11 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
     audio = []
     documents = []
     publication_id = int(callback.data[12:])
-    stmt = select(Publications).where(Publications.id == publication_id)
-    result = await session.execute(stmt)
-    publication = result.scalar()
+    publication = await get_single_publication(session, publication_id)
     if publication.max_grade:
         if user == 'student':
-            stmt = select(Submissions).where(
-                Submissions.publication == publication_id and Submissions.student == callback.message.from_user.id)
-            result = await session.execute(stmt)
-            submission = result.scalar()
+            submission = await get_single_submission_by_student_and_publication(session, publication_id,
+                                                                                callback.message.from_user.id)
             if submission:
                 if submission.grade:
                     await callback.message.answer(f'Grade: {submission.grade}/{publication.max_grade}',
@@ -202,9 +188,8 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
             await callback.message.answer(f'Here is publication', reply_markup=kb.publication_interact_unsubmitable)
         else:
             await callback.message.answer(f'Here is publication', reply_markup=kb.single_course)
-    query = select(Media).where(Media.publication == publication_id)
-    result = await session.execute(query)
-    media_files = result.scalars().all()
+
+    media_files = await get_media(session, publication_id)
 
     await media_sort(media_files, media_group, audio, documents)
 
@@ -258,9 +243,7 @@ async def single_submission(message: Message, session: AsyncSession, submission,
     else:
         keyboard = kb.publication_interact_submitted
 
-    stmt = select(Media).where(Media.submission == submission.id)
-    result = await session.execute(stmt)
-    media_files = result.scalars().all()
+    media_files = await get_media(session, submission_id=submission.id)
 
     await media_sort(media_files, media_group, audio, documents)
 
