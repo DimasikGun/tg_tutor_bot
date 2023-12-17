@@ -5,11 +5,12 @@ from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.queries import get_publications, delete_student_from_course, change_role_to_teacher, get_courses_student, \
-    create_submission, get_single_submission_student, get_course_by_key, \
-    get_single_coursestudent, join_course_student, create_media
+    create_submission, \
+    get_single_coursestudent, join_course_student, create_media, \
+    get_single_submission_by_student_and_publication, get_single_publication, get_course_by_key
 from handlers.common.keyboards import choose_ultimate
 from handlers.common.services import CourseInteract, publications, create_inline_courses, single_publication, \
-    Pagination, pagination_handler, add_media, single_submission
+    Pagination, pagination_handler, add_media, single_submission, course_info
 from handlers.students import keyboards as kb
 from handlers.students.notifications import joined_course, added_submission, deleted_submission, left_course
 
@@ -33,6 +34,12 @@ async def pagination_handler_student(query: CallbackQuery, callback_data: Pagina
 async def student_courses(message: Message, session: AsyncSession):
     courses = await get_courses_student(session, message.from_user.id, 5)
     await create_inline_courses(courses, message, kb)
+
+
+@router.callback_query(F.data.startswith('course_'))
+async def student_course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+    course_id = int(callback.data[7:])
+    await course_info(callback, session, state, kb, course_id)
 
 
 @router.callback_query(CourseInteract.single_course, Pagination.filter(F.action.in_(('prev', 'next'))),
@@ -114,7 +121,7 @@ async def submission_add_text(message: Message, state: FSMContext):
 
 
 @router.message(F.text == 'Ready', AddSubmission.media)
-async def add_publication_ready(message: Message, session: AsyncSession, state: FSMContext):
+async def add_submission_ready(message: Message, session: AsyncSession, state: FSMContext):
     data = await state.get_data()
 
     submission = await create_submission(session, data, message.from_user.id)
@@ -133,7 +140,7 @@ async def submission_add_media(message: Message, session: AsyncSession, state: F
     await state.set_state(AddSubmission.media)
     data = await state.get_data()
     if len(data['media']) >= 20:
-        await add_publication_ready(message, session, state)
+        await add_submission_ready(message, session, state)
     else:
         await add_media(message, session, state, data)
 
@@ -180,7 +187,10 @@ async def delete_submission_other(message: Message, session: AsyncSession, state
 @router.message(AddSubmission.single_publication, F.text == 'Watch submission')
 async def watch_submission(message: Message, session: AsyncSession, state: FSMContext):
     data = await state.get_data()
-    submission, max_grade = get_single_submission_student(session, data, message.from_user.id)
+    submission = await get_single_submission_by_student_and_publication(session, data['publication_id'],
+                                                                        message.from_user.id)
+    publication = await get_single_publication(session, submission.publication)
+    max_grade = publication.max_grade
     await single_submission(message, session, submission, kb, max_grade, 'student')
     await state.set_state(AddSubmission.single_publication)
 

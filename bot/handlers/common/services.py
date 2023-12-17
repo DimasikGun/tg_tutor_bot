@@ -191,7 +191,8 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, sta
 
     media_files = await get_media(session, publication_id)
 
-    await media_sort(media_files, media_group, audio, documents)
+    if media_files:
+        await media_sort(media_files, media_group, audio, documents)
 
     await callback.message.answer(
         f'SUBMIT UNTIL: {publication.finish_date}\n<b>{publication.title}</b>\n{publication.text}',

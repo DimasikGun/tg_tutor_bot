@@ -6,11 +6,12 @@ from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery, \
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.queries import get_students, get_code, delete_course, get_publications, delete_publication_query, \
+from db.queries import get_students, delete_course, get_publications, delete_publication_query, \
     get_submissions, delete_student_from_course, change_role_to_student, get_courses_teacher, \
-    get_single_student, create_publication, add_max_grade, \
+    create_publication, add_max_grade, \
     get_single_submission_teacher, set_submission_grade, edit_publication_title, \
-    edit_publication_text, edit_publication_media, create_course, edit_course_name, get_course_by_id, create_media
+    edit_publication_text, edit_publication_media, create_course, edit_course_name, get_course_by_id, create_media, \
+    get_user, get_single_publication
 from handlers.common.keyboards import choose, choose_ultimate
 from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
     single_publication, Pagination, pagination_handler, paginator, student_name_builder, add_media, \
@@ -47,7 +48,8 @@ async def tutor_courses(message: Message, session: AsyncSession):
 async def teacher_course_info(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     course_id = int(callback.data[7:])
     await course_info(callback, session, state, kb, course_id)
-    code = await get_code(session, course_id)
+    course = await get_course_by_id(session, course_id)
+    code = f'{course.key}{course.id}'
     students = await get_students(session, course_id)
     await callback.message.answer(f'Now there are <b>{len(students) if students else "no"}</b> students\nInvite code:',
                                   parse_mode='HTML')
@@ -107,7 +109,7 @@ class Students(StatesGroup):
 @router.callback_query(Teacher(), F.data.startswith('student_'), CourseInteract.single_course)
 async def single_student(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     student_id = int(callback.data[8:])
-    student = await get_single_student(session, student_id)
+    student = await get_user(session, student_id)
     if student.username:
         student_name = '@' + student.username
     elif student.first_name:
@@ -288,7 +290,9 @@ async def submissions(message: Message, session: AsyncSession, state: FSMContext
 
 @router.callback_query(Teacher(), F.data.startswith('submission_'))
 async def teacher_single_submission(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    submission, max_grade = await get_single_submission_teacher(session, int(callback.data[11:]))
+    submission = await get_single_submission_teacher(session, int(callback.data[11:]))
+    publication = await get_single_publication(session, submission.publication)
+    max_grade = publication.max_grade
     await state.update_data(submission_id=submission.id, max_grade=max_grade, student_id=submission.student)
     await single_submission(callback.message, session, submission, kb, max_grade)
     await callback.answer()

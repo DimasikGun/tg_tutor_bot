@@ -4,24 +4,26 @@ import os
 import sys
 
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.redis import RedisStorage
+from aioredis import Redis
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from aiogram.fsm.storage.redis import RedisStorage
 
 from middlewares.db import DbSessionMiddleware
 
 load_dotenv()
 bot = Bot(token=os.getenv('TOKEN'))
+redis_fsm = Redis()
+redis_cache = Redis(db=1)
 
 
 async def main():
     from handlers.common.handlers import router
     from handlers.students.handlers import router as student_router
     from handlers.tutors.handlers import router as teacher_router
-
     engine = create_async_engine(url=os.getenv('DB-URL'), echo=True)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
-    dp = Dispatcher(storage=RedisStorage.from_url('redis://localhost:6379/0'))
+    dp = Dispatcher(storage=RedisStorage(redis=redis_fsm))
     dp.update.middleware(DbSessionMiddleware(session_pool=sessionmaker))
     dp.include_routers(teacher_router, student_router, router)
     await dp.start_polling(bot)
