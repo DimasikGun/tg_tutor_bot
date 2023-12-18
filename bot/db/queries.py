@@ -81,9 +81,13 @@ async def get_publications(session: AsyncSession, course_id: int, limit: int = N
                 posts = [Publications(**json_publications)]
         else:
             stmt = select(Publications).where(Publications.course_id == course_id).order_by(
-                Publications.add_date.desc()).limit(limit)
+                Publications.add_date.desc())
             res = await session.execute(stmt)
             posts = res.scalars().all()
+            serialized_posts = await db_object_serializer(posts)
+            await redis.set(f'publications_course:{course_id}', serialized_posts)
+            await redis.expire(f'publications_course:{course_id}', 604800)
+            posts = posts[:limit]
     else:
         if cached_publications:
             json_publications = await db_object_deserializer(cached_publications)
@@ -96,8 +100,9 @@ async def get_publications(session: AsyncSession, course_id: int, limit: int = N
                 Publications.add_date.desc())
             res = await session.execute(stmt)
             posts = res.scalars().all()
-            serialized_user = await db_object_serializer(posts)
-            await redis.set(f'publications_course:{course_id}', serialized_user)
+            serialized_posts = await db_object_serializer(posts)
+            await redis.set(f'publications_course:{course_id}', serialized_posts)
+            await redis.expire(f'publications_course:{course_id}', 604800)
 
     return posts
 
@@ -112,9 +117,13 @@ async def get_students(session: AsyncSession, course_id: int, limit: int = None)
             else:
                 students = [Users(**json_students)]
         else:
-            stmt = select(Users).join(CoursesStudents).where(CoursesStudents.course_id == course_id).limit(limit)
+            stmt = select(Users).join(CoursesStudents).where(CoursesStudents.course_id == course_id)
             result = await session.execute(stmt)
             students = result.scalars().all()
+            serialized_students = await db_object_serializer(students)
+            await redis.set(f'students_course:{course_id}', serialized_students)
+            await redis.expire(f'students_course:{course_id}', 604800)
+            students = students[:limit]
     else:
         if cached_students:
             json_students = await db_object_deserializer(cached_students)
@@ -126,8 +135,9 @@ async def get_students(session: AsyncSession, course_id: int, limit: int = None)
             stmt = select(Users).join(CoursesStudents).where(CoursesStudents.course_id == course_id)
             result = await session.execute(stmt)
             students = result.scalars().all()
-            serialized_user = await db_object_serializer(students)
-            await redis.set(f'students_course:{course_id}', serialized_user)
+            serialized_students = await db_object_serializer(students)
+            await redis.set(f'students_course:{course_id}', serialized_students)
+            await redis.expire(f'students_course:{course_id}', 604800)
 
     return students
 
@@ -194,6 +204,11 @@ async def delete_course(session: AsyncSession, course_id: int) -> tuple:
     for student in students:
         await redis.delete(f'courses_student:{student}')
     for publication in publications:
+        stmt = select(Submissions.id).where(Submissions.publication == publication.id)
+        result = await session.execute(stmt)
+        submissions = result.scalars().all()
+        for submission in submissions:
+            await redis.delete(f'submission:{submission.id}')
         await redis.delete(f'submissions_publication:{publication.id}')
         await redis.delete(f'medias_publication:{publication.id}')
 
@@ -215,10 +230,15 @@ async def delete_publication_query(session: AsyncSession, publication_id: int) -
     stmt = select(Publications.course_id).where(Publications.id == publication_id)
     result = await session.execute(stmt)
     course_id = result.scalar()
+    stmt = select(Submissions.id).where(Submissions.publication == publication_id)
+    result = await session.execute(stmt)
+    submissions = result.scalars().all()
     await redis.delete(f'publication:{publication_id}')
     await redis.delete(f'publications_course:{course_id}')
     await redis.delete(f'submissions_publication:{publication_id}')
     await redis.delete(f'medias_publication:{publication_id}')
+    for submission in submissions:
+        await redis.delete(f'submission:{submission.id}')
 
 
 async def get_submissions(session: AsyncSession, publication_id: int, limit: int = None) -> Sequence:
@@ -231,9 +251,13 @@ async def get_submissions(session: AsyncSession, publication_id: int, limit: int
             else:
                 submissions = [Submissions(**json_submissions)]
         else:
-            stmt = select(Submissions).where(Submissions.publication == publication_id).limit(limit)
+            stmt = select(Submissions).where(Submissions.publication == publication_id)
             result = await session.execute(stmt)
             submissions = result.scalars().all()
+            serialized_submissions = await db_object_serializer(submissions)
+            await redis.set(f'submissions_publication:{publication_id}', serialized_submissions)
+            await redis.expire(f'submissions_publication:{publication_id}', 604800)
+            submissions = submissions[:limit]
     else:
         if cached_submissions:
             json_submissions = await db_object_deserializer(cached_submissions)
@@ -247,6 +271,7 @@ async def get_submissions(session: AsyncSession, publication_id: int, limit: int
             submissions = result.scalars().all()
             serialized_submissions = await db_object_serializer(submissions)
             await redis.set(f'submissions_publication:{publication_id}', serialized_submissions)
+            await redis.expire(f'submissions_publication:{publication_id}', 604800)
 
     return submissions
 
@@ -279,6 +304,7 @@ async def get_course_by_id(session: AsyncSession, course_id):
         course = result.scalar()
         serialized_course = await db_object_serializer(course)
         await redis.set(f'course{course_id}', serialized_course)
+        await redis.expire(f'course{course_id}', 604800)
     return course
 
 
@@ -292,9 +318,13 @@ async def get_courses_teacher(session: AsyncSession, teacher_id, limit: int = No
             else:
                 courses = [Courses(**json_courses)]
         else:
-            stmt = select(Courses).where(Courses.teacher == teacher_id).limit(limit)
+            stmt = select(Courses).where(Courses.teacher == teacher_id)
             res = await session.execute(stmt)
             courses = res.scalars().all()
+            serialized_courses = await db_object_serializer(courses)
+            await redis.set(f'courses_teacher:{teacher_id}', serialized_courses)
+            await redis.expire(f'courses_teacher:{teacher_id}', 604800)
+            courses = courses[:limit]
     else:
         if cached_courses:
             json_courses = await db_object_deserializer(cached_courses)
@@ -306,8 +336,9 @@ async def get_courses_teacher(session: AsyncSession, teacher_id, limit: int = No
             stmt = select(Courses).where(Courses.teacher == teacher_id)
             res = await session.execute(stmt)
             courses = res.scalars().all()
-            serialized_courses = db_object_serializer(courses)
-            redis.set(f'courses_teacher:{teacher_id}', serialized_courses)
+            serialized_courses = await db_object_serializer(courses)
+            await redis.set(f'courses_teacher:{teacher_id}', serialized_courses)
+            await redis.expire(f'courses_teacher:{teacher_id}', 604800)
 
     return courses
 
@@ -322,9 +353,13 @@ async def get_courses_student(session: AsyncSession, student_id, limit: int = No
             else:
                 courses = [Courses(**json_courses)]
         else:
-            stmt = select(Courses).join(CoursesStudents).where(CoursesStudents.student_id == student_id).limit(limit)
+            stmt = select(Courses).join(CoursesStudents).where(CoursesStudents.student_id == student_id)
             res = await session.execute(stmt)
             courses = res.scalars().all()
+            serialized_courses = await db_object_serializer(courses)
+            await redis.set(f'courses_student:{student_id}', serialized_courses)
+            await redis.expire(f'courses_student:{student_id}', 604800)
+            courses = courses[:limit]
     else:
         if cached_courses:
             json_courses = await db_object_deserializer(cached_courses)
@@ -336,8 +371,9 @@ async def get_courses_student(session: AsyncSession, student_id, limit: int = No
             stmt = select(Courses).join(CoursesStudents).where(CoursesStudents.student_id == student_id)
             res = await session.execute(stmt)
             courses = res.scalars().all()
-            serialized_courses = db_object_serializer(courses)
-            redis.set(f'courses_student:{student_id}', serialized_courses)
+            serialized_courses = await db_object_serializer(courses)
+            await redis.set(f'courses_student:{student_id}', serialized_courses)
+            await redis.expire(f'courses_student:{student_id}', 604800)
 
     return courses
 
@@ -379,7 +415,6 @@ async def delete_submission(session: AsyncSession, data, student_id):
     stmt = delete(Media).where(
         Media.submission.in_(select(Submissions.id).where(
             Submissions.publication == data['publication_id'] and Submissions.student == student_id)))
-    await redis.delete(f'medias_submission:{submission_id}')
     await session.execute(stmt)
     stmt = delete(Submissions).where(
         Submissions.publication == data['publication_id'] and Submissions.student == student_id)
@@ -387,6 +422,7 @@ async def delete_submission(session: AsyncSession, data, student_id):
     await session.commit()
     await redis.delete(f'submissions_publication:{data["publication_id"]}')
     await redis.delete(f'medias_submission:{submission_id}')
+    await redis.delete(f'submission:{submission_id}')
 
 
 async def get_single_coursestudent(session: AsyncSession, course_id, student_id):
@@ -412,26 +448,25 @@ async def add_max_grade(session: AsyncSession, data, max_grade):
 
 
 async def get_single_submission_teacher(session: AsyncSession, submission_id):
-    stmt = select(Submissions).where(Submissions.id == submission_id)
-    result = await session.execute(stmt)
-    submission = result.scalar()
-    return submission
-
-#TODO: REWORK UPPER FUNC AND BELOW ONE(CACHING)
-
-
-async def get_single_submission_by_student_and_publication(session: AsyncSession, publication_id, student_id):
-    cached_submission = await redis.get(f'submission:{publication_id}:{student_id}')
+    cached_submission = await redis.get(f'submission:{submission_id}')
     if cached_submission:
         json_submission = await db_object_deserializer(cached_submission)
         submission = Submissions(**json_submission)
     else:
-        stmt = select(Submissions).where(
-            Submissions.publication == publication_id and Submissions.student == student_id)
+        stmt = select(Submissions).where(Submissions.id == submission_id)
         result = await session.execute(stmt)
         submission = result.scalar()
-        serialized_submission = db_object_serializer(submission)
-        await redis.set(f'submission:{publication_id}:{student_id}', serialized_submission)
+        serialized_submission = await db_object_serializer(submission)
+        await redis.set(f'submission:{submission_id}', serialized_submission)
+        await redis.expire(f'submission:{submission_id}', 604800)
+    return submission
+
+
+async def get_single_submission_by_student_and_publication(session: AsyncSession, publication_id, student_id):
+    stmt = select(Submissions).where(
+        Submissions.publication == publication_id and Submissions.student == student_id)
+    result = await session.execute(stmt)
+    submission = result.scalar()
     return submission
 
 
@@ -485,6 +520,7 @@ async def get_user(session: AsyncSession, user_id):
         user = result.scalar()
         serialized_user = await db_object_serializer(user)
         await redis.set(f'user:{user.user_id}', serialized_user)
+        await redis.expire(f'user:{user.user_id}', 604800)
     return user
 
 
@@ -507,8 +543,10 @@ async def get_media(session: AsyncSession, publication_id=None, submission_id=No
             if len(media_files) != 0:
                 serialized_media = await db_object_serializer(media_files)
                 await redis.set(f'medias_publication:{publication_id}', serialized_media)
+                await redis.expire(f'medias_publication:{publication_id}', 604800)
             else:
                 await redis.set(f'medias_publication:{publication_id}', str(None))
+                await redis.expire(f'medias_publication:{publication_id}', 604800)
                 media_files = None
     else:
         cached_media = await redis.get(f'medias_submission:{submission_id}')
@@ -528,8 +566,10 @@ async def get_media(session: AsyncSession, publication_id=None, submission_id=No
             if len(media_files) != 0:
                 serialized_media = await db_object_serializer(media_files)
                 await redis.set(f'medias_submission:{submission_id}', serialized_media)
+                await redis.expire(f'medias_submission:{submission_id}', 604800)
             else:
                 await redis.set(f'medias_submission:{submission_id}', str(None))
+                await redis.expire(f'medias_submission:{submission_id}', 604800)
                 media_files = None
 
     return media_files

@@ -246,7 +246,8 @@ async def single_submission(message: Message, session: AsyncSession, submission,
 
     media_files = await get_media(session, submission_id=submission.id)
 
-    await media_sort(media_files, media_group, audio, documents)
+    if media_files:
+        await media_sort(media_files, media_group, audio, documents)
 
     await message.answer(
         f'SUBMITED: <b>{submission.add_date}</b>\n{submission.text}', reply_markup=keyboard,
