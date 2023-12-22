@@ -12,6 +12,15 @@ from handlers.tutors.notifications import publication_added, publication_edited
 
 
 async def add_publication_preview(message: Message, session: AsyncSession, state: FSMContext, action):
+    """
+    Adds a preview of the publication with specified date and time.
+
+    Args:
+        message (Message): The incoming message.
+        session (AsyncSession): The asynchronous database session.
+        state (FSMContext): The finite state machine context.
+        action (str): The action indicating whether the publication is being created or edited.
+    """
     data = await state.get_data()
     date_obj = None
     time_obj = None
@@ -47,6 +56,17 @@ async def add_publication_preview(message: Message, session: AsyncSession, state
 
 async def publication_date(message: Message, session: AsyncSession, state: FSMContext, state_name_re,
                            state_name_next, action):
+    """
+    Handles the input of the publication date by a tutor.
+
+    Args:
+        message (Message): The incoming message.
+        session (AsyncSession): The asynchronous database session.
+        state (FSMContext): The finite state machine context.
+        state_name_re (str): The name of the state for retrying date input.
+        state_name_next (str): The name of the next state after successful date input.
+        action (str): The action indicating whether the publication is being created or edited.
+    """
     date_pattern = r'\d{2}.\d{2}.\d{4}'
     if message.text == 'Ready':
         await add_publication_preview(message, session, state, action)
@@ -60,6 +80,16 @@ async def publication_date(message: Message, session: AsyncSession, state: FSMCo
 
 
 async def publication_time(message: Message, session: AsyncSession, state: FSMContext, state_name_re, action):
+    """
+    Handles the input of the publication time by a tutor.
+
+    Args:
+        message (Message): The incoming message.
+        session (AsyncSession): The asynchronous database session.
+        state (FSMContext): The finite state machine context.
+        state_name_re (str): The name of the state for retrying time input.
+        action (str): The action indicating whether the publication is being created or edited.
+    """
     time_pattern = r'\d{2}:\d{2}'
     if message.text == 'Ready':
         await add_publication_preview(message, session, state, action)

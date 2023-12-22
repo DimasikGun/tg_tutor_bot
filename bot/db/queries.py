@@ -10,6 +10,7 @@ from db import Courses, CoursesStudents, Media, Publications, Users, Submissions
 
 
 async def db_object_serializer(obj):
+    """Serializes SQLAlchemy objects into JSON format"""
     if type(obj) == list:
         serialized_data = []
         for item in obj:
@@ -38,6 +39,7 @@ async def db_object_serializer(obj):
 
 
 async def db_object_deserializer(json_obj):
+    """Deserializes JSON objects into SQLAlchemy objects"""
     deserialized_data = json.loads(json_obj)
 
     date_attributes = ["reg_date", "upd_date", "add_date", "finish_date"]
@@ -57,6 +59,7 @@ async def db_object_deserializer(json_obj):
 
 
 async def change_role_to_teacher(session: AsyncSession, student_id):
+    """Changes the role of a user with the given student_id to a teacher."""
     stmt = update(Users).where(Users.user_id == student_id).values(is_teacher=True)
     await session.execute(stmt)
     await session.commit()
@@ -64,6 +67,7 @@ async def change_role_to_teacher(session: AsyncSession, student_id):
 
 
 async def change_role_to_student(session: AsyncSession, teacher_id):
+    """Changes the role of a user with the given teacher_id to a student."""
     stmt = update(Users).where(Users.user_id == teacher_id).values(is_teacher=False)
     await session.execute(stmt)
     await session.commit()
@@ -71,6 +75,7 @@ async def change_role_to_student(session: AsyncSession, teacher_id):
 
 
 async def get_publications(session: AsyncSession, course_id: int, limit: int = None):
+    """Retrieves publications for a given course from the database or cache."""
     cached_publications = await redis.get(f'publications_course:{course_id}')
     if limit:
         if cached_publications:
@@ -108,6 +113,7 @@ async def get_publications(session: AsyncSession, course_id: int, limit: int = N
 
 
 async def get_students(session: AsyncSession, course_id: int, limit: int = None):
+    """Retrieves students for a given course from the database or cache."""
     cached_students = await redis.get(f'students_course:{course_id}')
     if limit:
         if cached_students:
@@ -143,6 +149,7 @@ async def get_students(session: AsyncSession, course_id: int, limit: int = None)
 
 
 async def get_single_publication(session: AsyncSession, publication_id):
+    """Retrieves a single publication by its ID from the database or cache."""
     cached_publication = await redis.get(f'publication:{publication_id}')
     if cached_publication:
         json_publication = await db_object_deserializer(cached_publication)
@@ -157,6 +164,7 @@ async def get_single_publication(session: AsyncSession, publication_id):
 
 
 async def create_user(session, callback, is_teacher):
+    """Retrieves a single publication by its ID from the database or cache."""
     await session.merge(
         Users(user_id=callback.from_user.id, username=callback.from_user.username,
               first_name=callback.from_user.first_name, second_name=callback.from_user.last_name,
@@ -164,6 +172,7 @@ async def create_user(session, callback, is_teacher):
 
 
 async def delete_course(session: AsyncSession, course_id: int) -> tuple:
+    """Deletes a course and related data from the database."""
     stmt = select(CoursesStudents.student_id).where(Courses.id == course_id)
     res = await session.execute(stmt)
     students = res.scalars().all()
@@ -216,6 +225,7 @@ async def delete_course(session: AsyncSession, course_id: int) -> tuple:
 
 
 async def delete_publication_query(session: AsyncSession, publication_id: int) -> None:
+    """Deletes a publication and related data from the database."""
     stmt = delete(Media).where(Media.publication == publication_id)
     await session.execute(stmt)
     stmt = delete(Media).where(
@@ -242,6 +252,7 @@ async def delete_publication_query(session: AsyncSession, publication_id: int) -
 
 
 async def get_submissions(session: AsyncSession, publication_id: int, limit: int = None) -> Sequence:
+    """Retrieves submissions for a given publication from the database or cache."""
     cached_submissions = await redis.get(f'submissions_publication:{publication_id}')
     if limit:
         if cached_submissions:
@@ -277,6 +288,7 @@ async def get_submissions(session: AsyncSession, publication_id: int, limit: int
 
 
 async def delete_student_from_course(session: AsyncSession, student, course):
+    """Removes a student from a course in the database."""
     stmt = delete(Media).where(
         Media.submission.in_(select(Submissions.id).where(
             Submissions.publication.in_(select(Publications.id).where(Publications.course_id == course)))))
@@ -294,6 +306,7 @@ async def delete_student_from_course(session: AsyncSession, student, course):
 
 
 async def get_course_by_id(session: AsyncSession, course_id):
+    """Retrieves a course by its ID from the database or cache."""
     cached_course = await redis.get(f'course:{course_id}')
     if cached_course:
         json_course = await db_object_deserializer(cached_course)
@@ -309,6 +322,7 @@ async def get_course_by_id(session: AsyncSession, course_id):
 
 
 async def get_courses_teacher(session: AsyncSession, teacher_id, limit: int = None):
+    """Retrieves courses for a given teacher from the database or cache."""
     cached_courses = await redis.get(f'courses_teacher:{teacher_id}')
     if limit:
         if cached_courses:
@@ -344,6 +358,7 @@ async def get_courses_teacher(session: AsyncSession, teacher_id, limit: int = No
 
 
 async def get_courses_student(session: AsyncSession, student_id, limit: int = None):
+    """Retrieves courses for a given student from the database or cache."""
     cached_courses = await redis.get(f'courses_student:{student_id}')
     if limit:
         if cached_courses:
@@ -379,6 +394,7 @@ async def get_courses_student(session: AsyncSession, student_id, limit: int = No
 
 
 async def get_course_by_key(session: AsyncSession, course_id, key):
+    """Retrieves a course by its ID and key from the database."""
     stmt = select(Courses).where(Courses.id == course_id and Courses.key == key)
     res = await session.execute(stmt)
     course = res.scalar()
@@ -386,6 +402,7 @@ async def get_course_by_key(session: AsyncSession, course_id, key):
 
 
 async def create_submission(session: AsyncSession, data, student_id):
+    """Creates a new submission in the database."""
     submission = await session.merge(
         Submissions(text=data['text'], publication=data['publication_id'], student=student_id))
     await session.commit()
@@ -394,6 +411,7 @@ async def create_submission(session: AsyncSession, data, student_id):
 
 
 async def create_publication(session: AsyncSession, data):
+    """Creates a new publication in the database."""
     publication = await session.merge(Publications(title=data['title'], course_id=data['course_id'], text=data['text']))
     await session.commit()
     await redis.delete(f'publications_course:{data["course_id"]}')
@@ -401,6 +419,7 @@ async def create_publication(session: AsyncSession, data):
 
 
 async def create_media(session: AsyncSession, media, submission=None, publication=None):
+    """Creates new media entries in the database."""
     await session.merge(
         Media(media_type=media[0], file_id=media[1], submission=submission.id if submission else None,
               publication=publication.id if publication else None))
@@ -408,6 +427,7 @@ async def create_media(session: AsyncSession, media, submission=None, publicatio
 
 
 async def delete_submission(session: AsyncSession, data, student_id):
+    """Deletes a submission and related data from the database."""
     submission_id_query = select(Submissions.id).where(
         Submissions.publication == data['publication_id'] and Submissions.student == student_id)
     submission_id = await session.execute(submission_id_query)
@@ -426,6 +446,7 @@ async def delete_submission(session: AsyncSession, data, student_id):
 
 
 async def get_single_coursestudent(session: AsyncSession, course_id, student_id):
+    """Retrieves a single course student entry from the database."""
     stmt = select(CoursesStudents).where(
         CoursesStudents.course_id == course_id,
         CoursesStudents.student_id == student_id
@@ -436,18 +457,21 @@ async def get_single_coursestudent(session: AsyncSession, course_id, student_id)
 
 
 async def join_course_student(session: AsyncSession, course_id, student_id):
+    """Adds a student to a course in the database."""
     await session.merge(CoursesStudents(course_id=course_id, student_id=student_id))
     await session.commit()
     await redis.delete(f'students_course:{course_id}')
 
 
 async def add_max_grade(session: AsyncSession, data, max_grade):
+    """Updates the maximum grade for a publication in the database."""
     stmt = update(Publications).where(Publications.id == data['publication_id']).values(max_grade=max_grade)
     await session.execute(stmt)
     await session.commit()
 
 
 async def get_single_submission_teacher(session: AsyncSession, submission_id):
+    """Retrieves a single submission by its ID from the database or cache."""
     cached_submission = await redis.get(f'submission:{submission_id}')
     if cached_submission:
         json_submission = await db_object_deserializer(cached_submission)
@@ -463,6 +487,7 @@ async def get_single_submission_teacher(session: AsyncSession, submission_id):
 
 
 async def get_single_submission_by_student_and_publication(session: AsyncSession, publication_id, student_id):
+    """Retrieves a single submission by student and publication ID from the database."""
     stmt = select(Submissions).where(
         Submissions.publication == publication_id and Submissions.student == student_id)
     result = await session.execute(stmt)
@@ -471,24 +496,28 @@ async def get_single_submission_by_student_and_publication(session: AsyncSession
 
 
 async def set_submission_grade(session: AsyncSession, data, grade):
+    """Sets the grade for a submission in the database."""
     stmt = update(Submissions).where(Submissions.id == data['submission_id']).values(grade=grade)
     await session.execute(stmt)
     await session.commit()
 
 
 async def edit_publication_title(session: AsyncSession, data, title):
+    """Updates the title of a publication in the database."""
     stmt = update(Publications).where(Publications.id == data['publication_id']).values(title=title)
     await session.execute(stmt)
     await session.commit()
 
 
 async def edit_publication_text(session: AsyncSession, data, text):
+    """Updates the text of a publication in the database."""
     stmt = update(Publications).where(Publications.id == data['publication_id']).values(text=text)
     await session.execute(stmt)
     await session.commit()
 
 
 async def edit_publication_media(session: AsyncSession, data):
+    """Updates the media files associated with a publication in the database."""
     stmt = delete(Media).where(Media.publication == data['publication_id'])
     await redis.delete(f'medias_publication:{data["publication_id"]}')
     await session.execute(stmt)
@@ -498,18 +527,21 @@ async def edit_publication_media(session: AsyncSession, data):
     await session.commit()
 
 
-async def edit_publication_datetime(session: AsyncSession, data, datetime):
-    stmt = update(Publications).where(Publications.id == data['publication_id']).values(finish_date=datetime)
+async def edit_publication_datetime(session: AsyncSession, data, dt):
+    """Updates the finish date of a publication in the database."""
+    stmt = update(Publications).where(Publications.id == data['publication_id']).values(finish_date=dt)
     await session.execute(stmt)
     await session.commit()
 
 
 async def create_course(session: AsyncSession, data, teacher):
+    """Creates a new course in the database"""
     await session.merge(Courses(name=data['name'], teacher=teacher))
     await session.commit()
 
 
 async def get_user(session: AsyncSession, user_id):
+    """Retrieves a user by ID from the database or cache."""
     cached_user = await redis.get(f'user:{user_id}')
     if cached_user:
         json_user = await db_object_deserializer(cached_user)
@@ -525,6 +557,7 @@ async def get_user(session: AsyncSession, user_id):
 
 
 async def get_media(session: AsyncSession, publication_id=None, submission_id=None):
+    """Retrieves media files for a publication or submission from the database or cache."""
     if publication_id:
         cached_media = await redis.get(f'medias_publication:{publication_id}')
         if cached_media:
@@ -576,6 +609,7 @@ async def get_media(session: AsyncSession, publication_id=None, submission_id=No
 
 
 async def edit_course_name(session: AsyncSession, data):
+    """Updates the name of a course in the database."""
     stmt = update(Courses).where(Courses.id == data['course_id']).values(name=data['name'])
     await session.execute(stmt)
     await session.commit()
