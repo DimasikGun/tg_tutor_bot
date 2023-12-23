@@ -160,6 +160,7 @@ async def get_single_publication(session: AsyncSession, publication_id):
         publication = result.scalar()
         serialized_publication = await db_object_serializer(publication)
         await redis.set(f'publication:{publication.id}', serialized_publication)
+        await redis.expire(f'publication:{publication.id}', 604800)
     return publication
 
 
@@ -171,8 +172,7 @@ async def create_user(session, callback, is_teacher):
               is_teacher=is_teacher))
 
 
-async def delete_course(session: AsyncSession, course_id: int) -> tuple:
-    """Deletes a course and related data from the database."""
+async def delete_coursesstudents(session: AsyncSession, course_id):
     stmt = select(CoursesStudents.student_id).where(Courses.id == course_id)
     res = await session.execute(stmt)
     students = res.scalars().all()
@@ -180,75 +180,102 @@ async def delete_course(session: AsyncSession, course_id: int) -> tuple:
     stmt = delete(CoursesStudents).where(CoursesStudents.course_id == course_id)
     await session.execute(stmt)
 
-    stmt = delete(Media).where(
-        Media.submission.in_(select(Submissions.id).where(
-            Submissions.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))))
-    await session.execute(stmt)
+    await redis.delete(f'students_course:{course_id}')
+    for student in students:
+        await redis.delete(f'courses_student:{student}')
+    return students
 
-    stmt = delete(Submissions).where(
-        Submissions.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))
-    await session.execute(stmt)
-    stmt = delete(Media).where(
-        Media.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))
-    await session.execute(stmt)
-    stmt = delete(Publications).where(Publications.course_id == course_id)
-    await session.execute(stmt)
 
+async def delete_submissions(session: AsyncSession, course_id: int = None, publication_id: int = None):
+    if publication_id:
+        stmt = delete(Media).where(
+            Media.submission.in_(select(Submissions.id).where(Submissions.publication == publication_id)))
+        await session.execute(stmt)
+        stmt = delete(Submissions).where(Submissions.publication == publication_id)
+        await session.execute(stmt)
+    else:
+        stmt = delete(Media).where(
+            Media.submission.in_(select(Submissions.id).where(
+                Submissions.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))))
+        await session.execute(stmt)
+
+        stmt = delete(Submissions).where(
+            Submissions.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))
+        await session.execute(stmt)
+
+
+async def delete_publication_query(session: AsyncSession, publication_id: int = None, course_id: int = None):
+    """Deletes a publication and related data from the database."""
+    if publication_id:
+        await delete_submissions(session, publication_id=publication_id)
+
+        stmt = delete(Media).where(Media.publication == publication_id)
+        await session.execute(stmt)
+
+        stmt = delete(Publications).where(Publications.id == publication_id)
+        await session.execute(stmt)
+
+        stmt = select(Publications.course_id).where(Publications.id == publication_id)
+        result = await session.execute(stmt)
+        course_id = result.scalar()
+        stmt = select(Submissions.id).where(Submissions.publication == publication_id)
+        result = await session.execute(stmt)
+        submissions = result.scalars().all()
+
+        await session.commit()
+
+        await redis.delete(f'publication:{publication_id}')
+        await redis.delete(f'submissions_publication:{publication_id}')
+        await redis.delete(f'medias_publication:{publication_id}')
+
+        for submission in submissions:
+            await redis.delete(f'submission:{submission.id}')
+    else:
+        stmt = select(Publications.id).where(Publications.course_id == course_id)
+        res = await session.execute(stmt)
+        publications = res.scalars().all()
+        stmt = delete(Media).where(
+            Media.publication.in_(select(Publications.id).where(Publications.course_id == course_id)))
+        await session.execute(stmt)
+
+        stmt = delete(Publications).where(Publications.course_id == course_id)
+        await session.execute(stmt)
+
+        for publication in publications:
+            await redis.delete(f'publication:{publication_id}')
+            await redis.delete(f'submissions_publication:{publication.id}')
+            await redis.delete(f'medias_publication:{publication.id}')
+            stmt = select(Submissions.id).where(Submissions.publication == publication.id)
+            result = await session.execute(stmt)
+            submissions = result.scalars().all()
+            for submission in submissions:
+                await redis.delete(f'submission:{submission.id}')
+
+    await redis.delete(f'publications_course:{course_id}')
+
+
+async def delete_course(session: AsyncSession, course_id: int) -> tuple:
+    """Deletes a course and related data from the database."""
     stmt = select(Courses).where(Courses.id == course_id)
     res = await session.execute(stmt)
     course = res.scalar()
 
-    stmt = select(Publications.id).where(Publications.course_id == course_id)
-    res = await session.execute(stmt)
-    publications = res.scalars().all()
+    students = await delete_coursesstudents(session, course_id)
+
+    await delete_submissions(session, course_id=course_id)
 
     stmt = delete(Courses).where(Courses.id == course_id)
     await session.execute(stmt)
+
+    await delete_publication_query(session, course_id=course_id)
+
     await session.commit()
 
     await redis.delete(f'publications_course:{course_id}')
-    await redis.delete(f'students_course:{course_id}')
     await redis.delet(f'courses_teacher:{course.teacher_id}')
     await redis.delet(f'course:{course_id}')
-    for student in students:
-        await redis.delete(f'courses_student:{student}')
-    for publication in publications:
-        stmt = select(Submissions.id).where(Submissions.publication == publication.id)
-        result = await session.execute(stmt)
-        submissions = result.scalars().all()
-        for submission in submissions:
-            await redis.delete(f'submission:{submission.id}')
-        await redis.delete(f'submissions_publication:{publication.id}')
-        await redis.delete(f'medias_publication:{publication.id}')
 
     return course.name, students
-
-
-async def delete_publication_query(session: AsyncSession, publication_id: int) -> None:
-    """Deletes a publication and related data from the database."""
-    stmt = delete(Media).where(Media.publication == publication_id)
-    await session.execute(stmt)
-    stmt = delete(Media).where(
-        Media.submission.in_(select(Submissions.id).where(Submissions.publication == publication_id)))
-    await session.execute(stmt)
-    stmt = delete(Submissions).where(Submissions.publication == publication_id)
-    await session.execute(stmt)
-    stmt = delete(Publications).where(Publications.id == publication_id)
-    await session.execute(stmt)
-    await session.commit()
-
-    stmt = select(Publications.course_id).where(Publications.id == publication_id)
-    result = await session.execute(stmt)
-    course_id = result.scalar()
-    stmt = select(Submissions.id).where(Submissions.publication == publication_id)
-    result = await session.execute(stmt)
-    submissions = result.scalars().all()
-    await redis.delete(f'publication:{publication_id}')
-    await redis.delete(f'publications_course:{course_id}')
-    await redis.delete(f'submissions_publication:{publication_id}')
-    await redis.delete(f'medias_publication:{publication_id}')
-    for submission in submissions:
-        await redis.delete(f'submission:{submission.id}')
 
 
 async def get_submissions(session: AsyncSession, publication_id: int, limit: int = None) -> Sequence:
@@ -316,8 +343,8 @@ async def get_course_by_id(session: AsyncSession, course_id):
         result = await session.execute(stmt)
         course = result.scalar()
         serialized_course = await db_object_serializer(course)
-        await redis.set(f'course{course_id}', serialized_course)
-        await redis.expire(f'course{course_id}', 604800)
+        await redis.set(f'course:{course_id}', serialized_course)
+        await redis.expire(f'course:{course_id}', 604800)
     return course
 
 
@@ -507,6 +534,7 @@ async def edit_publication_title(session: AsyncSession, data, title):
     stmt = update(Publications).where(Publications.id == data['publication_id']).values(title=title)
     await session.execute(stmt)
     await session.commit()
+    await redis.delete(f'publication:{data["publication_id"]}')
 
 
 async def edit_publication_text(session: AsyncSession, data, text):
@@ -514,6 +542,7 @@ async def edit_publication_text(session: AsyncSession, data, text):
     stmt = update(Publications).where(Publications.id == data['publication_id']).values(text=text)
     await session.execute(stmt)
     await session.commit()
+    await redis.delete(f'publication:{data["publication_id"]}')
 
 
 async def edit_publication_media(session: AsyncSession, data):
@@ -532,6 +561,7 @@ async def edit_publication_datetime(session: AsyncSession, data, dt):
     stmt = update(Publications).where(Publications.id == data['publication_id']).values(finish_date=dt)
     await session.execute(stmt)
     await session.commit()
+    await redis.delete(f'publication:{data["publication_id"]}')
 
 
 async def create_course(session: AsyncSession, data, teacher):
@@ -613,3 +643,4 @@ async def edit_course_name(session: AsyncSession, data):
     stmt = update(Courses).where(Courses.id == data['course_id']).values(name=data['name'])
     await session.execute(stmt)
     await session.commit()
+    await redis.delete(f'course:{data["course_id"]}')
