@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.queries import get_publications, delete_student_from_course, change_role_to_teacher, get_courses_student, \
     create_submission, get_single_coursestudent, join_course_student, create_media, \
-    get_single_submission_by_student_and_publication, get_single_publication, get_course_by_key
-from handlers.common.keyboards import choose_ultimate
+    get_single_submission_by_student_and_publication, get_single_publication, get_course_by_key, delete_submission_query
+from handlers.common.keyboards import choose_ultimate, main
 from handlers.common.services import CourseInteract, publications, create_inline_courses, single_publication, \
     Pagination, pagination_handler, add_media, single_submission, course_info
 from handlers.students import keyboards as kb
@@ -40,7 +40,7 @@ async def pagination_handler_student(query: CallbackQuery, callback_data: Pagina
         callback_data (Pagination): The pagination callback data.
         session (AsyncSession): The asynchronous database session.
     """
-    courses = await get_courses_student(session, query.message.from_user.id)
+    courses = await get_courses_student(session, query.from_user.id)
     await pagination_handler(query, callback_data, courses)
 
 
@@ -134,13 +134,13 @@ async def leave_course_confirmed(message: Message, session: AsyncSession, state:
         data = await state.get_data()
         await delete_student_from_course(session, message.from_user.id, data['course_id'])
         await left_course(session, data, message.from_user.id)
-        await state.set_state(CourseInteract.single_course)
-        await message.answer('You left the course', reply_markup=kb.single_course)
+        await state.clear()
+        await message.answer('You left the course', reply_markup=main)
 
     if message.text == 'No':
         await state.set_state(CourseInteract.single_course)
         await message.answer('You still in the course', reply_markup=kb.single_course)
-    else:
+    elif message.text != 'Yes' or message.text != 'Yes':
         await state.set_state(LeaveCourse.leave_course_confim)
         await message.answer('Choose "Yes" or "No"')
 
@@ -163,7 +163,7 @@ async def student_single_publication(callback: CallbackQuery, session: AsyncSess
         state (FSMContext): The finite state machine context.
     """
     await state.update_data(publication_id=int(callback.data[12:]))
-    await single_publication(callback, session, state, kb, 'student')
+    await single_publication(callback, session, kb, 'student')
     await state.set_state(AddSubmission.single_publication)
 
 
@@ -240,10 +240,10 @@ async def submission_add_media(message: Message, session: AsyncSession, state: F
     """
     await state.set_state(AddSubmission.media)
     data = await state.get_data()
-    if len(data['media']) >= 20:
+    if len(data['media']) >= 15:
         await add_submission_ready(message, session, state)
     else:
-        await add_media(message, session, state, data)
+        await add_media(message, state, data)
 
 
 @router.message(AddSubmission.single_publication, F.text == 'Go back')
@@ -284,23 +284,23 @@ async def delete_submission_confirmed(message: Message, session: AsyncSession, s
         session (AsyncSession): The asynchronous database session.
         state (FSMContext): The finite state machine context.
     """
-    if message.text == 'yes':
+    if message.text == 'Yes':
         data = await state.get_data()
-        await delete_submission(session, data, message.from_user.id)
+        await delete_submission_query(session, data, message.from_user.id)
         await message.reply(
             f'Your submission has been deleted',
             reply_markup=kb.single_course)
         await deleted_submission(session, data)
         await state.set_state(CourseInteract.single_course)
         await publications(message, session, state, kb)
-    elif message.text == 'no':
+    elif message.text == 'No':
         await state.set_state(CourseInteract.single_course)
         await publications(message, session, state, kb)
         await message.answer('Or choose an option below:', reply_markup=kb.single_course)
-    else:
+    elif message.text != 'No' or message.text != 'Yes':
         await state.set_state(AddSubmission.delete)
         await publications(message, session, state, kb)
-        await message.answer('Choose "Yes" or "No"', reply_markup=kb.single_course)
+        await message.answer('Choose "Yes" or "No"')
 
 
 @router.message(AddSubmission.single_publication, F.text == 'Watch submission')

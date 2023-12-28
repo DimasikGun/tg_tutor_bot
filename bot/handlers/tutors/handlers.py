@@ -34,9 +34,9 @@ async def tutor_change_role(message: Message, session: AsyncSession):
 
 @router.callback_query(Teacher(), Pagination.filter(F.action.in_(('prev', 'next'))),
                        Pagination.filter(F.entity_type == 'courses'))
-async def pagination_handler_student(query: CallbackQuery, callback_data: Pagination, session: AsyncSession):
+async def pagination_handler_courses(query: CallbackQuery, callback_data: Pagination, session: AsyncSession):
     """Handle pagination for courses when navigating through them."""
-    courses = await get_courses_teacher(session, query.message.from_user.id)
+    courses = await get_courses_teacher(session, query.from_user.id)
     await pagination_handler(query, callback_data, courses)
 
 
@@ -135,7 +135,7 @@ async def single_student(callback: CallbackQuery, session: AsyncSession, state: 
 @router.message(Teacher(), Students.delete_confirm)
 async def delete_student_confirmed(message: Message, session: AsyncSession, state: FSMContext):
     """Handle teacher`s answer about kick of the student from the course."""
-    if message.text == 'yes':
+    if message.text == 'Yes':
         data = await state.get_data()
         course_id = data['course_id']
         student_id = data['student_id']
@@ -144,13 +144,13 @@ async def delete_student_confirmed(message: Message, session: AsyncSession, stat
             f'User have been deleted from your course',
             reply_markup=kb.single_course)
         await student_kicked(session, data)
-        await state.set_state(CourseInteract.single_course)
         await students(message, session, state)
-    if message.text == 'no':
         await state.set_state(CourseInteract.single_course)
+    elif message.text == 'No':
         await students(message, session, state)
         await message.answer('Or choose an option below:', reply_markup=kb.single_course)
-    else:
+        await state.set_state(CourseInteract.single_course)
+    elif message.text != 'No' or message.text != 'Yes':
         await state.set_state(Students.delete_confirm)
         await message.answer('Сhoose "Yes" or "No"')
 
@@ -192,7 +192,8 @@ async def add_publication_text(message: Message, state: FSMContext):
     else:
         await state.update_data(text=message.text)
         await state.set_state(AddPublication.media)
-        await message.answer('Now send a media for your publication or press "Ready" button', reply_markup=kb.ready)
+        await message.answer('Now send a media for your publication one by one or press "Ready" button',
+                             reply_markup=kb.ready)
 
 
 @router.message(Teacher(), F.text == 'Ready', AddPublication.media)
@@ -239,7 +240,7 @@ async def add_publication_media(message: Message, session: AsyncSession, state: 
     if len(data['media']) >= 20:
         await add_publication_ready(message, session, state)
     else:
-        await add_media(message, session, state, data)
+        await add_media(message, state, data)
 
 
 @router.message(Teacher(), AddPublication.date)
@@ -256,8 +257,8 @@ async def add_publication_time(message: Message, session: AsyncSession, state: F
 
 class PublicationInteract(StatesGroup):
     interact = State()
-    edit = State()
     title_confirm = State()
+    max_grade_confirm = State()
     text_confirm = State()
     media_confirm = State()
     date_confirm = State()
@@ -269,7 +270,7 @@ class PublicationInteract(StatesGroup):
 @router.callback_query(Teacher(), F.data.startswith('publication_'))
 async def teacher_single_publication(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     """Display details of a specific publication for a teacher."""
-    await single_publication(callback, session, state, kb)
+    await single_publication(callback, session, kb)
     await state.set_state(PublicationInteract.interact)
     await state.update_data(publication_id=int(callback.data[12:]))
 
@@ -300,7 +301,7 @@ async def submissions(message: Message, session: AsyncSession, state: FSMContext
         await state.set_state(PublicationInteract.interact)
         await message.answer('Here is submissions:', reply_markup=builder.as_markup())
     else:
-        await message.answer('There is no any submissions yet', reply_markup=kb.single_course)
+        await message.answer('There is no any submissions yet')
 
 
 @router.callback_query(Teacher(), F.data.startswith('submission_'))
@@ -362,15 +363,15 @@ async def grade_go_back(message: Message, session: AsyncSession, state: FSMConte
 @router.message(Teacher(), PublicationInteract.interact, F.text == 'Edit')
 async def edit_publication(message: Message, state: FSMContext):
     """Initiate the process of editing a publication."""
-    await state.set_state(PublicationInteract.edit)
     await message.answer('What would you like to edit?', reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='Title', callback_data='title'),
          InlineKeyboardButton(text='Text', callback_data='text')],
         [InlineKeyboardButton(text='Media', callback_data='media'),
-         InlineKeyboardButton(text='Submit date', callback_data='submit_date')]]))
+         InlineKeyboardButton(text='Submit date', callback_data='submit_date')],
+        [InlineKeyboardButton(text='Max grade', callback_data='max_grade')]]))
 
 
-@router.callback_query(Teacher(), PublicationInteract.edit, F.data == 'title')
+@router.callback_query(Teacher(), PublicationInteract.interact, F.data == 'title')
 async def edit_title(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.answer('Enter a title of your publication')
@@ -392,7 +393,7 @@ async def edit_title_confirm(message: Message, session: AsyncSession, state: FSM
         await publications_teacher(message, session, state)
 
 
-@router.callback_query(Teacher(), PublicationInteract.edit, F.data == 'text')
+@router.callback_query(Teacher(), PublicationInteract.interact, F.data == 'text')
 async def edit_text(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.answer('Enter a text of your publication')
@@ -432,7 +433,7 @@ async def edit_media_ready(message: Message, session: AsyncSession, state: FSMCo
         await publications_teacher(message, session, state)
 
 
-@router.callback_query(Teacher(), PublicationInteract.edit, F.data == 'media')
+@router.callback_query(Teacher(), PublicationInteract.interact, F.data == 'media')
 async def edit_media(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.answer(
@@ -450,10 +451,40 @@ async def edit_media_confirm(message: Message, session: AsyncSession, state: FSM
     if len(data['media']) >= 20:
         await edit_media_ready(message, session, state)
     else:
-        await add_media(message, session, state, data)
+        await add_media(message, state, data)
 
 
-@router.callback_query(Teacher(), PublicationInteract.edit, F.data == 'submit_date')
+@router.callback_query(Teacher(), PublicationInteract.interact, F.data == 'max_grade')
+async def edit_max_grade(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer(
+        'Now text a new max grade or press "Ready button to leave it blank',
+        reply_markup=kb.ready)
+    await state.set_state(PublicationInteract.max_grade_confirm)
+
+
+@router.message(Teacher(), PublicationInteract.max_grade_confirm)
+async def edit_max_grade_confirm(message: Message, session: AsyncSession, state: FSMContext):
+    """Handle the confirmation of editing max grade for a publication."""
+    if message.text == 'Ready':
+        data = await state.get_data()
+        await message.answer('Now there is no max grade for this publication')
+        await publication_edited(session, data)
+        await state.set_state(CourseInteract.single_course)
+        await publications_teacher(message, session, state)
+    elif message.text.isdigit() and 0 < int(message.text) <= 100:
+        data = await state.get_data()
+        await add_max_grade(session, data, int(message.text))
+        await message.answer(f'Now max grade for this publication is {message.text}', reply_markup=kb.single_course)
+        await publication_edited(session, data)
+        await state.set_state(CourseInteract.single_course)
+        await publications_teacher(message, session, state)
+    else:
+        await state.set_state(PublicationInteract.max_grade_confirm)
+        await message.answer('Max grade must be greater then 0 and less or equals 100')
+
+
+@router.callback_query(Teacher(), PublicationInteract.interact, F.data == 'submit_date')
 async def edit_datetime(callback: CallbackQuery, state: FSMContext):
     """Initiate the process of editing the date and time of a publication."""
     await callback.answer()
@@ -519,19 +550,10 @@ async def add_course(message: Message, state: FSMContext):
         await message.answer(f'Are you sure with name: "{message.text}"?', reply_markup=choose)
 
 
-@router.message(F.text.casefold() == "cancel")
-async def cmd_cancel(message: Message, state: FSMContext):
-    """Handle the confirmation of adding a new course."""
-    await state.clear()
-    await message.answer(
-        text="Action was cancelled",
-        reply_markup=kb.courses)
-
-
-@router.message(Teacher(), AddCourse.confirm, F.text.casefold() == 'yes')
+@router.message(Teacher(), AddCourse.confirm)
 async def add_course_confirmed(message: Message, session: AsyncSession, state: FSMContext):
     """Handle the teacher`s answer about adding a new course and prompt for a new name."""
-    if message.text == 'yes':
+    if message.text == 'Yes':
         data = await state.get_data()
         await state.clear()
         await create_course(session, data, message.from_user.id)
@@ -539,11 +561,17 @@ async def add_course_confirmed(message: Message, session: AsyncSession, state: F
             f'Your course "{data["name"]}" have been created',
             reply_markup=kb.courses)
         await tutor_courses(message, session)
-    elif message.text == 'no':
+    elif message.text == 'No':
         await state.set_state(AddCourse.name)
         await message.answer("Then enter a new one", reply_markup=ReplyKeyboardRemove())
-    else:
-        await message.reply('I don`t get it, choose "yes", "no" or "cancel"')
+    elif message.text == 'Cancel':
+        await state.clear()
+        await message.answer(
+            text="Action was cancelled",
+            reply_markup=kb.courses)
+    elif message.text != 'No' or message.text != 'Yes':
+        await state.set_state(AddCourse.confirm)
+        await message.reply('I don`t get it, choose "Yes", "No" or "Cancel"')
 
 
 class EditCourse(StatesGroup):
@@ -576,7 +604,7 @@ async def change_course_name(message: Message, state: FSMContext):
 @router.message(Teacher(), EditCourse.name_confirm)
 async def change_course_name_confirmed(message: Message, session: AsyncSession, state: FSMContext):
     """Handle the teacher`s answer about changing the name of a course."""
-    if message.text == 'yes':
+    if message.text == 'Yes':
         data = await state.get_data()
 
         course = await get_course_by_id(session, data['course_id'])
@@ -591,12 +619,15 @@ async def change_course_name_confirmed(message: Message, session: AsyncSession, 
         await tutor_courses(message, session)
         await state.set_state(CourseInteract.single_course)
 
-    elif message.text == 'no':
+    elif message.text == 'No':
         await message.answer("Then enter a new one", reply_markup=ReplyKeyboardRemove())
         await state.set_state(EditCourse.name)
+    elif message.text == 'Cancel':
+        await message.answer("Action was canceled", reply_markup=kb.single_course)
+        await state.set_state(CourseInteract.single_course)
     else:
-        await state.set_state( EditCourse.name_confirm)
-        await message.reply('I don`t get it, choose "yes", "no" or "cancel"')
+        await state.set_state(EditCourse.name_confirm)
+        await message.reply('I don`t get it, choose "Yes", "No" or "Cancel"')
 
 
 @router.message(Teacher(), F.text == 'Delete course', CourseInteract.single_course)
@@ -609,7 +640,7 @@ async def delete_course_start(message: Message, state: FSMContext):
 @router.message(Teacher(), EditCourse.delete_confirm)
 async def delete_course_confirmed(message: Message, session: AsyncSession, state: FSMContext):
     """Handle the teacher`s answer about deleting a course."""
-    if message.text == 'yes':
+    if message.text == 'Yes':
         data = await state.get_data()
         course_id = data['course_id']
         data = await delete_course(session, course_id)
@@ -619,10 +650,8 @@ async def delete_course_confirmed(message: Message, session: AsyncSession, state
         await course_deleted(data)
         await state.clear()
         await tutor_courses(message, session)
-    elif message.text == 'no':
+    elif message.text == 'No':
         await tutor_courses(message, session)
-    else:
+    elif message.text != 'No' or message.text != 'Yes':
         await state.set_state(EditCourse.delete_confirm)
-        await message.answer('Choose "yes" or "no"')
-
-
+        await message.answer('Choose "Yes" or "No"')

@@ -116,17 +116,16 @@ async def pagination_handler(query: CallbackQuery, callback_data: Pagination, re
     page_num = int(callback_data.page)
 
     if callback_data.action == 'next':
-        if page_num < (len(records) // 5):
+        if page_num < ((len(records) - 1) // 5):
             page = page_num + 1
         else:
-            page = page_num
+
             await query.answer('This is the last page')
             return
     else:
         if page_num > 0:
             page = page_num - 1
         else:
-            page = 0
             await query.answer('This is the first page')
             return
 
@@ -281,7 +280,11 @@ async def media_group_send(message: Message, media_group: list, audio: list, doc
         None
     """
     if media_group:
-        await message.answer_media_group(media_group)
+        if len(media_group) <= 10:
+            await message.answer_media_group(media_group)
+        else:
+            await message.answer_media_group(media_group[:10])
+            await message.answer_media_group(media_group[11:])
     if documents:
         await message.answer('Documents:')
         await message.answer_media_group(documents)
@@ -352,7 +355,7 @@ async def single_publication(callback: CallbackQuery, session: AsyncSession, kb,
 
 async def add_media(message: Message, state: FSMContext, data):
     """
-    Handles adding media to a submission.
+    Handles adding media to a submission or publication.
 
     Args:
         message: The message.
@@ -363,8 +366,10 @@ async def add_media(message: Message, state: FSMContext, data):
         None
     """
     message_type = message.content_type
+    if message.media_group_id:
+        await message.answer('Send media one by one')
 
-    if message_type in (
+    elif message_type in (
             ContentType.VIDEO, ContentType.AUDIO, ContentType.DOCUMENT):
         file_id = eval(f"message.{message_type}.file_id")
         media = data['media']
