@@ -4,14 +4,14 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.queries import get_publications, delete_student_from_course, change_role_to_teacher, get_courses_student, \
+from bot.db.queries import get_publications, delete_student_from_course, change_role_to_teacher, get_courses_student, \
     create_submission, get_single_coursestudent, join_course_student, create_media, \
     get_single_submission_by_student_and_publication, get_single_publication, get_course_by_key, delete_submission_query
-from handlers.common.keyboards import choose_ultimate, main
-from handlers.common.services import CourseInteract, publications, create_inline_courses, single_publication, \
+from bot.handlers.common.keyboards import choose_ultimate, main
+from bot.handlers.common.services import CourseInteract, publications, create_inline_courses, single_publication, \
     Pagination, pagination_handler, add_media, single_submission, course_info
-from handlers.students import keyboards as kb
-from handlers.students.notifications import joined_course, added_submission, deleted_submission, left_course
+from bot.handlers.students import keyboards as kb
+from bot.handlers.students.notifications import joined_course, added_submission, deleted_submission, left_course
 
 router = Router()
 

@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 from bot.handlers.common import keyboards as kb
-from db.queries import create_user, get_user
+from bot.db.queries import create_user, get_user
 
 router = Router()
 

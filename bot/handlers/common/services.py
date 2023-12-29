@@ -9,7 +9,7 @@ from aiogram.types import Message, InlineKeyboardButton, CallbackQuery, InputMed
     InputMediaAudio, InputMediaDocument
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
-from db.queries import get_user, get_publications, get_course_by_id, get_single_publication, \
+from bot.db.queries import get_user, get_publications, get_course_by_id, get_single_publication, \
     get_single_submission_by_student_and_publication, get_media
 
 

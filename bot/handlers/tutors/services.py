@@ -5,10 +5,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.queries import edit_publication_datetime
-from handlers.common.services import CourseInteract, publications
-from handlers.tutors import keyboards as kb
-from handlers.tutors.notifications import publication_added, publication_edited
+from bot.db.queries import edit_publication_datetime
+from bot.handlers.common.services import CourseInteract, publications
+from bot.handlers.tutors import keyboards as kb
+from bot.handlers.tutors.notifications import publication_added, publication_edited
 
 
 async def add_publication_preview(message: Message, session: AsyncSession, state: FSMContext, action):

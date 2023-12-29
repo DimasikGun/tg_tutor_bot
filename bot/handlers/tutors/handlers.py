@@ -6,21 +6,21 @@ from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery, \
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.queries import get_students, delete_course, get_publications, delete_publication_query, \
+from bot.db.queries import get_students, delete_course, get_publications, delete_publication_query, \
     get_submissions, delete_student_from_course, change_role_to_student, get_courses_teacher, \
     create_publication, add_max_grade, \
     get_single_submission_teacher, set_submission_grade, edit_publication_title, \
     edit_publication_text, edit_publication_media, create_course, edit_course_name, get_course_by_id, create_media, \
     get_user, get_single_publication
-from handlers.common.keyboards import choose, choose_ultimate
-from handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
+from bot.handlers.common.keyboards import choose, choose_ultimate
+from bot.handlers.common.services import CourseInteract, publications, create_inline_courses, course_info, \
     single_publication, Pagination, pagination_handler, paginator, student_name_builder, add_media, \
     submission_name_builder, single_submission
-from handlers.tutors import keyboards as kb
-from handlers.tutors.filters import Teacher
-from handlers.tutors.notifications import publication_edited, submission_graded, student_kicked, publication_deleted, \
+from bot.handlers.tutors import keyboards as kb
+from bot.handlers.tutors.filters import Teacher
+from bot.handlers.tutors.notifications import publication_edited, submission_graded, student_kicked, publication_deleted, \
     course_deleted, course_renamed
-from handlers.tutors.services import publication_date, publication_time
+from bot.handlers.tutors.services import publication_date, publication_time
 
 router = Router()
 

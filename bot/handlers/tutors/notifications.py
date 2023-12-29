@@ -1,8 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from __main__ import bot
-from db.queries import get_course_by_id, get_single_publication, get_students
-from handlers.common.keyboards import main
+from bot.__main__ import bot
+from bot.db.queries import get_course_by_id, get_single_publication, get_students
+from bot.handlers.common.keyboards import main
 
 
 async def publication_added(session: AsyncSession, data):

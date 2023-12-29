@@ -1,7 +1,7 @@
-from __main__ import bot
-from db.queries import get_user, get_course_by_id, get_single_publication
-from handlers.common.keyboards import main
-from handlers.common.services import student_name_builder
+from bot.__main__ import bot
+from bot.db.queries import get_user, get_course_by_id, get_single_publication
+from bot.handlers.common.keyboards import main
+from bot.handlers.common.services import student_name_builder
 
 
 async def joined_course(name, teacher):

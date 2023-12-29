@@ -2,7 +2,7 @@ from aiogram.filters import Filter
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.queries import get_user
+from bot.db.queries import get_user
 
 
 class Teacher(Filter):

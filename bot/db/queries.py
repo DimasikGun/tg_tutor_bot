@@ -5,8 +5,8 @@ from json import JSONDecodeError
 from sqlalchemy import select, Sequence, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from __main__ import redis_cache as redis
-from db import Courses, CoursesStudents, Media, Publications, Users, Submissions
+from bot.__main__ import redis_cache as redis
+from bot.db import Courses, CoursesStudents, Media, Publications, Users, Submissions
 
 
 async def db_object_serializer(obj):
