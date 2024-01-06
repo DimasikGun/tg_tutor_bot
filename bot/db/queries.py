@@ -587,9 +587,12 @@ async def get_user(session: AsyncSession, user_id):
         stmt = select(Users).where(Users.user_id == user_id)
         result = await session.execute(stmt)
         user = result.scalar()
-        serialized_user = await db_object_serializer(user)
-        await redis.set(f'user:{user.user_id}', serialized_user)
-        await redis.expire(f'user:{user.user_id}', 604800)
+        try:
+            serialized_user = await db_object_serializer(user)
+            await redis.set(f'user:{user.user_id}', serialized_user)
+            await redis.expire(f'user:{user.user_id}', 604800)
+        except AttributeError:
+            pass
     return user
 
 

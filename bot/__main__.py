@@ -9,18 +9,18 @@ from aioredis import Redis
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from middlewares.db import DbSessionMiddleware
+from bot.middlewares.db import DbSessionMiddleware
 
 load_dotenv()
 bot = Bot(token=os.getenv('TOKEN'))
-redis_fsm = Redis()
-redis_cache = Redis(db=1)
+redis_fsm = Redis(host='redis', port=6379)
+redis_cache = Redis(host='redis', port=6379, db=1)
 
 
 async def main():
-    from handlers.common.handlers import router
-    from handlers.students.handlers import router as student_router
-    from handlers.tutors.handlers import router as teacher_router
+    from bot.handlers.common.handlers import router
+    from bot.handlers.students.handlers import router as student_router
+    from bot.handlers.tutors.handlers import router as teacher_router
     engine = create_async_engine(url=os.getenv('DB-URL'), echo=True)
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
     dp = Dispatcher(storage=RedisStorage(redis=redis_fsm))
